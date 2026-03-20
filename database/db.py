@@ -110,19 +110,19 @@ class DatabaseManager():
         async with self.__session() as session:
             return await crud.get_engagements_by_fleet(session, fleet_name, active_only)
     # -------------------------------------------- GALAXY DATA --------------------------------------------------------------
-    async def add_galaxy_system(self, galaxy_system: models.GalaxySystemDB) -> bool:
+    async def add_galaxy_system(self, galaxy_system: models.GalaxySystem) -> bool:
         async with self.__session() as session:
             return await crud.upsert_galaxy_system(session, galaxy_system)
 
-    async def get_galaxy_system(self, system_id: int) -> Optional[models.GalaxySystemDB]:
+    async def get_galaxy_system(self, system_id: int) -> Optional[models.GalaxySystem]:
         async with self.__session() as session:
             return await crud.get_galaxy_system(session, system_id)
 
-    async def get_all_galaxy_systems(self) -> Dict[int, models.GalaxySystemDB]:
+    async def get_all_galaxy_systems(self) -> Dict[int, models.GalaxySystem]:
         async with self.__session() as session:
             return await crud.get_all_galaxy_systems(session)
 
-    async def get_targeted_galaxy_systems(self) -> Dict[int, models.GalaxySystemDB]:
+    async def get_targeted_galaxy_systems(self) -> Dict[int, models.GalaxySystem]:
         async with self.__session() as session:
             return await crud.get_targeted_galaxy_systems(session)
 

@@ -2,7 +2,9 @@ import asyncio
 import logging
 import os
 
-from private.bot_token import PUBLIC_TOKEN
+import discord
+
+from private.bot_token import DISCORD_TOKEN
 from classes.bot import FleetToolsBot
 
 
@@ -20,9 +22,13 @@ def setup_logging() -> None:
 
 async def main() -> None:
     setup_logging()
+    intents = discord.Intents.default()
+    intents.members = True
+    intents.message_content = True
+    intents.guilds = True
     bot = FleetToolsBot()
     async with bot:
-        await bot.start(PUBLIC_TOKEN)
+        await bot.start(DISCORD_TOKEN)
 
 
 if __name__ == "__main__":

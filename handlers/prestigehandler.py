@@ -309,7 +309,7 @@ async def build_prestige_recipes(
 
 async def load_prestige_recipes_from_storage(bot: "FleetToolsBot") -> Dict[int, List[PrestigeRecipe]]:
     try:
-        stored_data = bot.data_manager.load_prestige_recipes() # TODO integrate with new bot
+        stored_data = bot.cache_manager.load_prestige_recipes()
 
         if not stored_data:
             ic("No prestige recipes in storage - will rebuild")

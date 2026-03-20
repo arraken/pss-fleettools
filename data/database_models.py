@@ -3,7 +3,7 @@ from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
-class Engagement(SQLModel, table=True):
+class OldEngagement(SQLModel, table=True):
     __tablename__ = "engagements"
 
     engagement_id: int = Field(primary_key=True)
@@ -20,7 +20,7 @@ class Engagement(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class GalaxySystem(SQLModel, table=True):
+class OldGalaxySystem(SQLModel, table=True):
     __tablename__ = "galaxy_systems"
 
     system_id: int = Field(primary_key=True)

@@ -7,7 +7,7 @@ from pssapi.entities.raw import EngagementRaw
 from pssapi.utils.exceptions import PssApiError
 
 from classes.views.engagementparticipantsview import EngagementParticipantsView
-from data import database_models as models
+from database import models
 from data.constants.galaxy import STAR_SYSTEMS
 from data.databaseclasses import EngagementSystemData, _ensure_aware
 from handlers import databasehandler as crud
@@ -49,6 +49,7 @@ async def get_fleet_wars_status(bot: "FleetToolsBot") -> List[Dict]:
                 continue
 
             owner_name, cooldown_end = result
+            cooldown_end = _ensure_aware(cooldown_end)
 
             # Format cooldown status
             cooldown_secs = 0
@@ -102,6 +103,7 @@ async def get_system_status(bot: "FleetToolsBot", system_name: str) -> Optional[
         return None
 
     owner_name, cooldown_end = result
+    cooldown_end = _ensure_aware(cooldown_end)
 
     # Format cooldown status
     if cooldown_end:
@@ -591,8 +593,8 @@ async def refresh_galaxy_state(bot: "FleetToolsBot", force_refresh_all: bool = F
 
         bot.logger.info(f"Refreshing {len(systems_to_refresh)} systems...")
 
-        # Refresh systems concurrently in smaller batches with delays (Option D)
-        batch_size = 5  # Reduced from 10 to 5
+        # Refresh systems concurrently in smaller batches with delays
+        batch_size = 10
         for i in range(0, len(systems_to_refresh), batch_size):
             batch = systems_to_refresh[i:i + batch_size]
             tasks = [bot.api_manager.get_galaxy_data(system_id) for system_id in batch]

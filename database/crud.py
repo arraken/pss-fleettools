@@ -91,7 +91,7 @@ async def get_engagements_by_fleet(session: AsyncSession, fleet_name: str, activ
 # Galaxy system commands
 # ============================================================================
 
-async def upsert_galaxy_system(session: AsyncSession, galaxy_system: models.GalaxySystemDB) -> bool:
+async def upsert_galaxy_system(session: AsyncSession, galaxy_system: models.GalaxySystem) -> bool:
     try:
         await session.merge(galaxy_system)
         return True
@@ -99,24 +99,24 @@ async def upsert_galaxy_system(session: AsyncSession, galaxy_system: models.Gala
         return False
 
 
-async def get_galaxy_system(session: AsyncSession, system_id: int) -> Optional[models.GalaxySystemDB]:
-    return await session.get(models.GalaxySystemDB, system_id)
+async def get_galaxy_system(session: AsyncSession, system_id: int) -> Optional[models.GalaxySystem]:
+    return await session.get(models.GalaxySystem, system_id)
 
 
-async def get_all_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystemDB]:
-    result = await session.exec(select(models.GalaxySystemDB))
+async def get_all_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystem]:
+    result = await session.exec(select(models.GalaxySystem))
     systems = result.all()
     return {system.system_id: system for system in systems}
 
 
-async def get_targeted_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystemDB]:
-    result = await session.exec(select(models.GalaxySystemDB).where(models.GalaxySystemDB.is_targeted == True))
+async def get_targeted_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystem]:
+    result = await session.exec(select(models.GalaxySystem).where(models.GalaxySystem.is_targeted == True))
     systems = result.all()
     return {system.system_id: system for system in systems}
 
 
 async def clear_system_target_by_fleet_id(session: AsyncSession, system_id: int, fleet_id: int) -> bool:
-    system = await session.get(models.GalaxySystemDB, system_id)
+    system = await session.get(models.GalaxySystem, system_id)
     if not system or (system and not system.is_targeted):
         return False
 

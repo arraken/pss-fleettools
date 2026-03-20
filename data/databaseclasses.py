@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from data.database_models import Engagement, GalaxySystem
+from database.models import Engagement, GalaxySystem
 
 
 @dataclass

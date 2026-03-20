@@ -4,8 +4,6 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-
-
 class FleetToolsBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()

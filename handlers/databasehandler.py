@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
 
-from data import database_models as models
+from database import models
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 DATABASE_URL = "sqlite+aiosqlite:///./data/fleetwars.db"
@@ -164,19 +164,19 @@ async def clear_system_target(session: AsyncSession, system_id: int) -> bool:
 # TODO: finish these when implementing the dynamic admin role + channel system
 # ============================================================================
 
-async def get_all_fleet_role_mappings(session: AsyncSession) -> Dict[str, models.FleetRoleMapping]:
+async def get_all_fleet_role_mappings(session: AsyncSession) -> Dict[str, models.FleetRoleMappingDB]:
     """Returns a dict of fleet_name -> FleetRoleMapping for building admin_role_mapping."""
-    result = await session.exec(select(models.FleetRoleMapping))
+    result = await session.exec(select(models.FleetRoleMappingDB))
     rows = result.all()
     return {row.fleet_name: row for row in rows}
 
 
-async def get_alert_channel(session: AsyncSession, guild_id: int, channel_type: str = "engagements") -> Optional[models.AlertChannel]:
+async def get_alert_channel(session: AsyncSession, guild_id: int, channel_type: str = "engagements") -> Optional[models.AlertChannelDB]:
     """Returns the AlertChannel row for a given guild and channel type."""
     stmt = (
-        select(models.AlertChannel)
-        .where(models.AlertChannel.guild_id == guild_id)
-        .where(models.AlertChannel.channel_type == channel_type)
+        select(models.AlertChannelDB)
+        .where(models.AlertChannelDB.guild_id == guild_id)
+        .where(models.AlertChannelDB.channel_type == channel_type)
     )
     result = await session.exec(stmt)
     return result.first()

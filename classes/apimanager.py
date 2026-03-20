@@ -7,7 +7,9 @@ import aiohttp
 import pssapi
 from discord.app_commands.errors import CommandInvokeError
 from pssapi import PssApiClient
+from pssapi.entities.character import Character as _Characters
 from pssapi.utils.exceptions import PssApiError
+from fuzzywuzzy import fuzz
 
 from data.constants.galaxy import STAR_SYSTEMS as STAR_SYSTEM_IDS
 from handlers import errorhandlers
@@ -17,6 +19,7 @@ if TYPE_CHECKING:
     from pssapi.entities.raw import EngagementRaw
     from classes.bot import FleetToolsBot
 
+_FUZZY_MATCH_THRESHOLD = 80
 
 class ApiManager:
     def __init__(self, bot: "FleetToolsBot"):
@@ -139,11 +142,80 @@ class ApiManager:
     # PSS API wrappers
     # ------------------------------------------------------------------
 
-    async def get_engagement(self, engagement_id: int) -> "EngagementRaw":
-        pass # TODO pull from MA
+    async def get_engagement(self, engagement_id: int):
+        client_date_time = pssapi.utils.get_utc_now()
+        checksum = self.client.battle_service.utils.create_get_engagement_checksum(client_date_time, CHECKSUM_KEY)
+
+        async def _call():
+            access_token = await self.get_token()
+            return await self.client.battle_service.get_engagement(access_token, checksum, client_date_time, engagement_id)
+
+        return await self._make_api_call(_call, allow_token_refresh=False, max_retries=0)
 
     async def get_galaxy_data(self, system_id: int):
-        pass # TODO pull from MA
+        production_server = await self.client.get_production_server()
+
+        async def _call():
+            token = await self.get_token()
+            return await pssapi.services.raw.galaxy_service_raw.get_star_system_details(production_server, token, system_id)
+
+        return await self._make_api_call(_call)
+
+    async def get_user_by_name(self, name: str):
+        return await self._make_api_call(self.client.user_service.search_users, name)
+
+    async def get_crew_by_name(self, crew_name: str):
+        crew_list = await self._make_api_call(self.client.character_service.list_all_character_designs)
+
+        best_match = None
+        best_score = 0
+        crew_name_lower = crew_name.lower()
+        query_len = len(crew_name_lower)
+
+        for crew in crew_list:
+            candidate = crew.character_design_name.lower()
+            candidate_len = len(candidate)
+
+            # WRatio gives a balanced score across multiple fuzzy strategies
+            base_score = fuzz.WRatio(crew_name_lower, candidate)
+
+            # Apply a length-ratio penalty: a candidate much shorter than the
+            # query gets penalised so "Eric" can't beat "Server Eric" when the
+            # user typed "Server Eric".
+            if candidate_len < query_len:
+                length_ratio = candidate_len / query_len
+                score = base_score * length_ratio
+            else:
+                score = base_score
+
+            if score > best_score:
+                best_score = score
+                best_match = crew
+
+        return best_match if best_score >= _FUZZY_MATCH_THRESHOLD else None
+
+    async def get_ship_characters_by_user_name(self, player_name: str):
+        _PATH: str = "PublicService/GetShipCharactersByUsername"
+        params = {"username": player_name, "accessToken": PUBLIC_TOKEN}
+        production_server = await self.client.get_production_server()
+        return await pssapi.core.get_entities_from_path(
+            ((_Characters, "Characters", False),),
+            "GetShipCharactersByUsername",
+            production_server,
+            _PATH,
+            "GET",
+            response_gzipped=False,
+            **params,
+        )
+
+    async def get_all_crew(self):
+        return await self._make_api_call(self.client.character_service.list_all_character_designs)
+
+    async def prestige_from(self, crew_id: int):
+        return await self._make_api_call(self.client.character_service.prestige_character_from, crew_id)
+
+    async def prestige_to(self, crew_id: int):
+        return await self._make_api_call(self.client.character_service.prestige_character_to, crew_id)
     # ------------------------------------------------------------------
     # Core API call machinery
     # ------------------------------------------------------------------
