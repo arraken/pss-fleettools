@@ -5,8 +5,9 @@ import discord
 from discord.ext import commands
 
 class FleetToolsBot(commands.Bot):
-    def __init__(self):
-        intents = discord.Intents.default()
+    def __init__(self, intents: discord.Intents | None = None):
+        if intents is None:
+            intents = discord.Intents.default()
         super().__init__(command_prefix="!", intents=intents)
 
         self.logger = logging.getLogger("FleetWarsBot")

@@ -26,7 +26,7 @@ async def main() -> None:
     intents.members = True
     intents.message_content = True
     intents.guilds = True
-    bot = FleetToolsBot()
+    bot = FleetToolsBot(intents=intents)
     async with bot:
         await bot.start(DISCORD_TOKEN)
 
