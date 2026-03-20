@@ -1,0 +1,8 @@
+discord.py>=2.3.0
+pssapi @ git+https://github.com/PSS-Tools-Development/pssapi.py.git@release/v0.7.0
+aiohttp
+sqlmodel>=0.0.14
+sqlalchemy[asyncio]>=2.0.0
+aiosqlite
+icecream
+
