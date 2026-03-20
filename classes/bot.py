@@ -6,7 +6,7 @@ from discord.ext import commands
 
 
 
-class FleetWarsBot(commands.Bot):
+class FleetToolsBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         super().__init__(command_prefix="!", intents=intents)

@@ -1,1 +1,1 @@
-from .bot import FleetWarsBot
+from .bot import FleetToolsBot

@@ -50,7 +50,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 if TYPE_CHECKING:
-    from classes import FleetWarsBot
+    from classes import FleetToolsBot
 
 # Import crud after get_session is defined to avoid circular import
 from . import crud
@@ -79,7 +79,7 @@ class AsyncAutoRollbackSession:
 class DatabaseManager():
     __engine: AsyncEngine
 
-    def __init__(self, bot: "FleetWarsBot"):
+    def __init__(self, bot: "FleetToolsBot"):
         self.bot = bot
         #asyncio.create_task(self.__set_up_db_engine(DATABASE_URL))
 

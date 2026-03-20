@@ -14,7 +14,7 @@ from handlers import databasehandler as crud
 from handlers.databasehandler import get_session
 
 if TYPE_CHECKING:
-    from classes.bot import FleetWarsBot
+    from classes.bot import FleetToolsBot
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,7 +27,7 @@ def get_system_id_by_name(system_name: str) -> Optional[int]:
     return None
 
 
-async def get_fleet_wars_status(bot: "FleetWarsBot") -> List[Dict]:
+async def get_fleet_wars_status(bot: "FleetToolsBot") -> List[Dict]:
     now = datetime.now(tz=timezone.utc)
     systems_data = []
 
@@ -86,7 +86,7 @@ async def get_fleet_wars_status(bot: "FleetWarsBot") -> List[Dict]:
     return systems_data
 
 
-async def get_system_status(bot: "FleetWarsBot", system_name: str) -> Optional[Dict]:
+async def get_system_status(bot: "FleetToolsBot", system_name: str) -> Optional[Dict]:
     system_id = get_system_id_by_name(system_name)
     if system_id is None:
         return None
@@ -121,7 +121,7 @@ async def get_system_status(bot: "FleetWarsBot", system_name: str) -> Optional[D
         'owner': owner_name,
         'cooldown': cooldown_status
     }
-async def get_active_engagements(bot: "FleetWarsBot") -> List[EngagementSystemData]:
+async def get_active_engagements(bot: "FleetToolsBot") -> List[EngagementSystemData]:
     # Get the highest engagement_id from the database to know where to start
     async with get_session() as session:
         last_engagement_id = await crud.get_max_engagement_id(session)
@@ -204,7 +204,7 @@ async def get_active_engagements(bot: "FleetWarsBot") -> List[EngagementSystemDa
     return new_active_engagements
 
 
-async def prune_expired_engagements(bot: "FleetWarsBot") -> int:
+async def prune_expired_engagements(bot: "FleetToolsBot") -> int:
     current_time = datetime.now(timezone.utc)
     pruned_count = 0
 
@@ -351,7 +351,7 @@ async def create_engagement_embed_option(engagements) -> discord.Embed:
     return embed
 
 async def create_engagement_detail_embed(
-                                            bot: "FleetWarsBot",
+                                            bot: "FleetToolsBot",
                                             engagement_id: int) -> tuple[discord.Embed, Optional[discord.ui.View]]:
     # Get max engagement ID from DB
     async with get_session() as session:
@@ -537,7 +537,7 @@ async def create_engagement_detail_embed(
     return embed, view
 
 
-async def refresh_galaxy_state(bot: "FleetWarsBot", force_refresh_all: bool = False) -> int:
+async def refresh_galaxy_state(bot: "FleetToolsBot", force_refresh_all: bool = False) -> int:
     now = datetime.now(timezone.utc)
     refreshed_count = 0
 

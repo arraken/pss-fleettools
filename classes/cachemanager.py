@@ -9,11 +9,11 @@ from handlers import databasehandler as crud
 from handlers.databasehandler import get_session
 
 if TYPE_CHECKING:
-    from classes.bot import FleetWarsBot
+    from classes.bot import FleetToolsBot
 
 
 class CacheManager:
-    def __init__(self, bot: "FleetWarsBot"):
+    def __init__(self, bot: "FleetToolsBot"):
         self.bot = bot
         self.__active_engagements: Dict[int, EngagementSystemData] = {}
         self.__galaxy_systems: Dict[int, models.GalaxySystem] = {}

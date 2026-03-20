@@ -11,11 +11,11 @@ from data.databaseclasses import EngagementSystemData
 from handlers.databasehandler import get_session
 
 if TYPE_CHECKING:
-    from classes.bot import FleetWarsBot
+    from classes.bot import FleetToolsBot
 
 
 class TimerMonitor(commands.Cog):
-    def __init__(self, bot: "FleetWarsBot"):
+    def __init__(self, bot: "FleetToolsBot"):
         self.bot = bot
 
         # TODO: load this dynamically from the fleet_role_mappings DB table.

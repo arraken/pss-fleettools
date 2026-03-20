@@ -3,7 +3,7 @@ import logging
 import os
 
 from private.bot_token import PUBLIC_TOKEN
-from classes.bot import FleetWarsBot
+from classes.bot import FleetToolsBot
 
 
 def setup_logging() -> None:
@@ -13,14 +13,14 @@ def setup_logging() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("logs/fleetwars.log", encoding="utf-8"),
+            logging.FileHandler("logs/fleettools.log", encoding="utf-8"),
         ],
     )
 
 
 async def main() -> None:
     setup_logging()
-    bot = FleetWarsBot()
+    bot = FleetToolsBot()
     async with bot:
         await bot.start(PUBLIC_TOKEN)
 

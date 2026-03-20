@@ -15,11 +15,11 @@ from private.bot_token import CHECKSUM_KEY, PUBLIC_TOKEN
 
 if TYPE_CHECKING:
     from pssapi.entities.raw import EngagementRaw
-    from classes.bot import FleetWarsBot
+    from classes.bot import FleetToolsBot
 
 
 class ApiManager:
-    def __init__(self, bot: "FleetWarsBot"):
+    def __init__(self, bot: "FleetToolsBot"):
         self.bot = bot
 
         self.api_call_counter = 0

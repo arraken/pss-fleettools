@@ -7,11 +7,11 @@ from discord.ext import commands
 from handlers import fleetwarshandler
 
 if TYPE_CHECKING:
-    from classes.bot import FleetWarsBot
+    from classes.bot import FleetToolsBot
 
 
 class Commands(commands.Cog):
-    def __init__(self, bot: "FleetWarsBot"):
+    def __init__(self, bot: "FleetToolsBot"):
         self.bot = bot
 
     @app_commands.command(name="engagements", description="Show all currently active fleet engagements")
