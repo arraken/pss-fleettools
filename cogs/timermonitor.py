@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import datetime, time as dt_time, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 import discord
@@ -26,10 +27,12 @@ class TimerMonitor(commands.Cog):
     async def cog_load(self) -> None:
         self.engagements_pulse.start()
         self.galaxy_state_refresh.start()
+        self.monthly_prestige_rebuild.start()
 
     async def cog_unload(self) -> None:
         self.engagements_pulse.cancel()
         self.galaxy_state_refresh.cancel()
+        self.monthly_prestige_rebuild.cancel()
 
     @tasks.loop(minutes=5)
     async def engagements_pulse(self):
@@ -53,15 +56,50 @@ class TimerMonitor(commands.Cog):
     async def before_galaxy_state_refresh(self):
         await self.bot.wait_until_ready()
 
+    # Fires every day at UTC 00:00:00; only acts on the 1st of the month.
+    @tasks.loop(time=dt_time(0, 0, 0, tzinfo=timezone.utc))
+    async def monthly_prestige_rebuild(self):
+        if datetime.now(timezone.utc).day != 1:
+            return
+        self.bot.logger.info("[Monthly] First of month — scheduling prestige recipe rebuild.")
+        try:
+            await asyncio.wait_for(self._monthly_prestige_rebuild_inner(), timeout=600.0)
+        except asyncio.TimeoutError:
+            self.bot.logger.error("[Monthly] Prestige rebuild timed out after 10 minutes.")
+
+    @monthly_prestige_rebuild.before_loop
+    async def before_monthly_prestige_rebuild(self):
+        await self.bot.wait_until_ready()
+
+    async def _monthly_prestige_rebuild_inner(self):
+        from handlers import prestigehandler
+
+        self.bot.logger.info("[Monthly] Clearing prestige recipe cache...")
+        self.bot.cache_manager.clear_prestige_recipes()
+        self.bot.cache_manager.api_prestige_recipes.clear()
+        self.bot.cache_manager.prestige_build_status = "building_from_api"
+
+        self.bot.logger.info("[Monthly] Rebuilding prestige recipes from API...")
+        try:
+            new_recipes = await prestigehandler.build_prestige_recipes(self.bot)
+            self.bot.cache_manager.api_prestige_recipes = new_recipes
+            self.bot.cache_manager.save_prestige_recipes_data()
+            self.bot.cache_manager.prestige_build_status = "complete"
+            total = sum(len(v) for v in new_recipes.values())
+            self.bot.logger.info(f"[Monthly] ✅ Prestige recipes rebuilt: {total} recipes.")
+        except Exception as e:
+            self.bot.cache_manager.prestige_build_status = "failed"
+            self.bot.logger.error(f"[Monthly] ❌ Failed to rebuild prestige recipes: {e}")
+
     async def _engagements_pulse_inner(self):
-        print(f"Starting engagements pulse at {datetime.now(timezone.utc).isoformat()}")
+        self.bot.logger.info(f"Starting engagements pulse at {datetime.now(timezone.utc).isoformat()}")
         await fleetwarshandler.prune_expired_engagements(self.bot)
         new_engagements = await fleetwarshandler.get_active_engagements(self.bot)
         await self.check_and_alert_new_engagements(new_engagements)
         await self.sync_active_engagements_from_db()
 
     async def _galaxy_state_refresh_inner(self):
-        print("Galaxy State Refresh: Updating system ownership and cooldowns...")
+        self.bot.logger.info("Galaxy State Refresh: Updating system ownership and cooldowns...")
         refreshed = 0
         try:
             refreshed = await fleetwarshandler.refresh_galaxy_state(self.bot, force_refresh_all=False)
@@ -80,7 +118,7 @@ class TimerMonitor(commands.Cog):
                     eng_data = EngagementSystemData.from_db_model(db_eng)
                     new_map[eid] = eng_data
                 except Exception as e:
-                    print(f"Skipping engagement {eid} during sync: {e}")
+                    self.bot.logger.info(f"Skipping engagement {eid} during sync: {e}")
 
             # Preferred API on CacheManager
             if hasattr(self.bot.cache_manager, "replace_active_engagements"):
@@ -104,7 +142,7 @@ class TimerMonitor(commands.Cog):
             return len(new_map)
 
         except Exception as e:
-            print(f"Error during engagement cache sync {e}")
+            self.bot.logger.info(f"Error during engagement cache sync {e}")
             return 0
 
     async def check_and_alert_new_engagements(self, new_engagements: List[EngagementSystemData]) -> None:

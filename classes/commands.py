@@ -194,3 +194,54 @@ class Commands(commands.Cog):
         # Only pass view if it's not None
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="helpfleettools", description="List all available FleetTools commands and their arguments")
+    async def helpfleettools(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="FleetTools — Command Reference",
+            description="Below are all available commands and their arguments.",
+            color=discord.Color.blurple(),
+        )
+        embed.timestamp = discord.utils.utcnow()
+
+        embed.add_field(
+            name="`/engagements`",
+            value=("Show all currently active fleet war engagements."),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="`/engagement_stats`",
+            value=(
+                "Show detailed statistics for a specific engagement.\n"
+                "**Required**\n"
+                "• `engagement_id` — the numeric ID of the engagement to look up, use `/engagements` for numbers"),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="`/galaxy_status`",
+            value=(
+                "View all star systems with their current owners and cooldown timers.\n"
+                "Systems are grouped by owner fleet, with attackable systems shown first.\n"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="`/prestige_calculator`",
+            value=(
+                "Find prestige crafting paths to reach a target crew using a player's current roster.\n"
+                "**Required**\n"
+                "• `player_name` — exact in-game player name to look up\n"
+                "• `target_crew_name` — name of the crew you want to craft\n"
+                "**Optional**\n"
+                "• `exclude` — comma-separated crew names to exclude from the calculation\n"
+                "• `min_rarity` — ignore crew below this rarity tier *(default: Common)*\n"
+                "  › `Common` · `Elite` · `Unique` · `Epic` · `Hero`"
+            ),
+            inline=False,
+        )
+
+        embed.set_footer(text="FleetTools  •  Use / to autocomplete any command")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
