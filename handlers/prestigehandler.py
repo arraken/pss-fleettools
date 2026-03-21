@@ -788,7 +788,8 @@ async def create_prestige_embed(
 
     embed = discord.Embed(
         title=f"✅ Prestige Paths Found",
-        description=f"**Player:** {player_name}\n**Target:** {target_crew_name}",
+        description=f"**Player:** {player_name}\n**Target:** {target_crew_name}\n"
+        "Prestige recipes will change on April 1st, July 1st, October 1st, and January 1st",
         color=discord.Color.green()
     )
 

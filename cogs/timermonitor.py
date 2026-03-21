@@ -137,7 +137,7 @@ class TimerMonitor(commands.Cog):
                         priv = self.bot.cache_manager._CacheManager__active_engagements
                     priv.clear()
                     priv.update(new_map)
-                    self.bot.cache_manager._active_engagements = priv
+                    self.bot.cache_manager._CacheManager__active_engagements = priv
 
             return len(new_map)
 

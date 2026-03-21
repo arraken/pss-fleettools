@@ -35,6 +35,18 @@ async def init_engine():
             await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             await conn.run_sync(SQLModel.metadata.create_all)
 
+            # Column migrations for existing tables (SQLite does not auto-add columns)
+            result = await conn.exec_driver_sql("PRAGMA table_info(galaxy_systems)")
+            existing_cols = {row[1] for row in result.fetchall()}
+            if "under_attack" not in existing_cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE galaxy_systems ADD COLUMN under_attack BOOLEAN NOT NULL DEFAULT 0"
+                )
+            if "active_engagement_id" not in existing_cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE galaxy_systems ADD COLUMN active_engagement_id INTEGER"
+                )
+
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     global _engine

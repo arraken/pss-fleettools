@@ -245,3 +245,7 @@ class Commands(commands.Cog):
         embed.set_footer(text="FleetTools  •  Use / to autocomplete any command")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+        if interaction.user.id == 210545386580869121:  # Only show this debug message to the bot owner
+            for guild in self.bot.guilds:
+                self.bot.logger.info(f"Found guild: {guild.name} - ID: {guild.id}")
+

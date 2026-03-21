@@ -178,8 +178,26 @@ async def get_active_engagements(bot: "FleetToolsBot") -> List[EngagementSystemD
                 bot.logger.info(f"Active engagement found: ID {engagement_id} in system ID {engagement_raw.star_system_id}")
                 new_active_engagements.append(engagement_data)
 
-                # Update in-memory cache (write-through)
-                bot.cache_manager._CacheManager__active_engagements[engagement_id] = engagement_data
+                # Update in-memory cache (write-through) via lock-safe method
+                await bot.cache_manager.update_active_engagement(engagement_id, engagement_data)
+
+                # Immediately mark the galaxy system as under attack so the state is
+                # accurate before the next galaxy_state_refresh cycle runs
+                try:
+                    async with get_session() as gs_session:
+                        galaxy_system = await crud.get_galaxy_system(gs_session, engagement_raw.star_system_id)
+                        if galaxy_system:
+                            galaxy_system.under_attack = True
+                            galaxy_system.active_engagement_id = engagement_id
+                            galaxy_system.last_updated = current_time
+                            await crud.upsert_galaxy_system(gs_session, galaxy_system)
+                            await bot.cache_manager.update_galaxy_system_cache(
+                                engagement_raw.star_system_id, galaxy_system
+                            )
+                except Exception as e:
+                    bot.logger.warning(
+                        f"Could not mark system {engagement_raw.star_system_id} as under_attack: {e}"
+                    )
 
             # Reset consecutive failures on success
             consecutive_failures = 0
@@ -233,8 +251,25 @@ async def prune_expired_engagements(bot: "FleetToolsBot") -> int:
                         pruned_count += 1
                         bot.logger.info(f"Pruning expired engagement ID {engagement_id} (ended at {end_time})")
 
-                        if engagement_id in bot.cache_manager._CacheManager__active_engagements:
-                            del bot.cache_manager._CacheManager__active_engagements[engagement_id]
+                        # Use lock-safe removal
+                        await bot.cache_manager.remove_engagement_from_cache(engagement_id)
+
+                        # Clear under_attack on the galaxy system so state is consistent
+                        # before the next galaxy_state_refresh cycle runs
+                        try:
+                            galaxy_system = await crud.get_galaxy_system(session, engagement_data.system_id)
+                            if galaxy_system and galaxy_system.under_attack:
+                                galaxy_system.under_attack = False
+                                galaxy_system.active_engagement_id = None
+                                galaxy_system.last_updated = current_time
+                                await crud.upsert_galaxy_system(session, galaxy_system)
+                                await bot.cache_manager.update_galaxy_system_cache(
+                                    engagement_data.system_id, galaxy_system
+                                )
+                        except Exception as e:
+                            bot.logger.warning(
+                                f"Could not clear under_attack for system {engagement_data.system_id}: {e}"
+                            )
 
         if pruned_count > 0:
             remaining_active = len(active_engagements) - pruned_count
@@ -545,6 +580,10 @@ async def refresh_galaxy_state(bot: "FleetToolsBot", force_refresh_all: bool = F
 
     bot.logger.info(f"Starting galaxy state refresh (force_all={force_refresh_all})...")
 
+    engagement_snapshot = await bot.cache_manager.get_active_engagements_snapshot()
+    active_engagement_system_ids: set[int] = {eng.system_id for eng in engagement_snapshot.values()}
+    active_engagement_by_system: dict[int, int] = {eng.system_id: eng.engagement_id for eng in engagement_snapshot.values()}
+
     # Validate token before starting batch operations to prevent cascade
     try:
         bot.logger.info("Galaxy State Refresh: Validating token before batch operations...")
@@ -565,10 +604,6 @@ async def refresh_galaxy_state(bot: "FleetToolsBot", force_refresh_all: bool = F
             systems_to_refresh = list(STAR_SYSTEMS.keys())
         else:
             # Get active engagement system IDs from in-memory cache
-            active_engagement_system_ids = {
-                eng.system_id
-                for eng in bot.cache_manager._CacheManager__active_engagements.values()
-            }
 
             for system_id in STAR_SYSTEMS.keys():
                 if system_id in existing_systems:
@@ -626,6 +661,9 @@ async def refresh_galaxy_state(bot: "FleetToolsBot", force_refresh_all: bool = F
                             except (ValueError, TypeError):
                                 pass
 
+                    is_under_attack = system_id in active_engagement_system_ids
+                    engagement_id_for_system = active_engagement_by_system.get(system_id)
+
                     # Check if system exists in DB
                     existing_system = existing_systems.get(system_id)
 
@@ -633,6 +671,8 @@ async def refresh_galaxy_state(bot: "FleetToolsBot", force_refresh_all: bool = F
                         # Update existing system
                         existing_system.owner_name = owner_name
                         existing_system.cooldown_end = cooldown_end
+                        existing_system.under_attack = is_under_attack
+                        existing_system.active_engagement_id = engagement_id_for_system
                         existing_system.last_updated = now
                     else:
                         # Create new system
@@ -642,6 +682,8 @@ async def refresh_galaxy_state(bot: "FleetToolsBot", force_refresh_all: bool = F
                             system_name=system_name,
                             owner_name=owner_name,
                             cooldown_end=cooldown_end,
+                            under_attack=is_under_attack,
+                            active_engagement_id=engagement_id_for_system,
                             last_updated=now,
                             is_targeted=False
                         )

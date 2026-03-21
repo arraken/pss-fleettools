@@ -29,6 +29,10 @@ class GalaxySystem(SQLModel, table=True):
     cooldown_end: Optional[datetime] = Field(default=None, index=True)
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
 
+    # Active engagement state
+    under_attack: bool = Field(default=False, index=True)
+    active_engagement_id: Optional[int] = Field(default=None)
+
     # # Fleet wars targeting info
     is_targeted: bool = Field(default=False, index=True)
     # targeting_fleet: Optional[str] = Field(default=None)

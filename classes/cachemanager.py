@@ -80,6 +80,11 @@ class CacheManager:
             self.__active_engagements.clear()
             self.__active_engagements.update(new_map)
 
+    async def get_active_engagements_snapshot(self) -> Dict[int, EngagementSystemData]:
+        """Return a shallow copy of the active engagements dict, safe to iterate outside the lock."""
+        async with self._active_engagements_lock:
+            return dict(self.__active_engagements)
+
     # ------------------------------------------------------------------
     # Galaxy system cache
     # ------------------------------------------------------------------
@@ -161,7 +166,10 @@ class CacheManager:
                 last_updated = last_updated.replace(tzinfo=timezone.utc)
             age_minutes = (datetime.now(timezone.utc) - last_updated).total_seconds() / 60
             if age_minutes < max_age_minutes:
-                return system.owner_name or "Unclaimed", system.cooldown_end
+                cooldown_end = system.cooldown_end
+                if cooldown_end is not None and cooldown_end.tzinfo is None:
+                    cooldown_end = cooldown_end.replace(tzinfo=timezone.utc)
+                return system.owner_name or "Unclaimed", cooldown_end
 
         # Cache miss or stale — fetch from API
         try:
@@ -418,3 +426,14 @@ class CacheManager:
         except Exception as e:
             logger.critical(f"Error saving {key}: {e}")
             return False
+
+    async def remove_engagement_from_cache(self, engagement_id: int) -> bool:
+        async with self._active_engagements_lock:
+            if engagement_id in self._active_engagements:
+                del self._active_engagements[engagement_id]
+                return True
+            return False
+
+    async def update_active_engagement(self, engagement_id: int, data: EngagementSystemData) -> None:
+        async with self._active_engagements_lock:
+            self._active_engagements[engagement_id] = data
