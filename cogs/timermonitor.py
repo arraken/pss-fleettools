@@ -25,6 +25,7 @@ class TimerMonitor(commands.Cog):
         self.admin_role_mapping: Dict[str, Dict[str, int]] = {}
 
     async def cog_load(self) -> None:
+        await self._load_admin_role_mapping()
         self.engagements_pulse.start()
         self.galaxy_state_refresh.start()
         self.monthly_prestige_rebuild.start()
@@ -39,7 +40,9 @@ class TimerMonitor(commands.Cog):
         try:
             await asyncio.wait_for(self._engagements_pulse_inner(), timeout=240.0)
         except asyncio.TimeoutError:
-            print("Engagements pulse timed out after 4 minutes")
+            self.bot.logger.error("Engagements pulse timed out after 4 minutes")
+        except Exception as e:
+            self.bot.logger.error(f"Engagements pulse error: {e}", exc_info=True)
 
     @tasks.loop(minutes=10)
     async def galaxy_state_refresh(self):
@@ -145,15 +148,39 @@ class TimerMonitor(commands.Cog):
             self.bot.logger.info(f"Error during engagement cache sync {e}")
             return 0
 
+    async def _load_admin_role_mapping(self) -> None:
+        """Populate admin_role_mapping from the fleet_role_mappings DB table."""
+        try:
+            async with get_session() as session:
+                rows = await databasehandler.get_all_fleet_role_mappings(session)
+            self.admin_role_mapping = {
+                name: {"admin_id": row.admin_role_id}
+                for name, row in rows.items()
+            }
+            self.bot.logger.info(f"Loaded {len(self.admin_role_mapping)} fleet role mappings.")
+        except Exception as e:
+            self.bot.logger.error(f"Failed to load fleet role mappings: {e}", exc_info=True)
+
+    async def _get_engagement_alert_channel(self):
+        """Resolve the engagement alert channel from the DB."""
+        try:
+            async with get_session() as session:
+                rows = await databasehandler.get_all_alert_channels(session, channel_type="engagements")
+            for row in rows:
+                channel = await self.bot.retrieve_channel(row.channel_id)
+                if channel:
+                    return channel
+        except Exception as e:
+            self.bot.logger.error(f"Error resolving engagement alert channel: {e}", exc_info=True)
+        return None
+
     async def check_and_alert_new_engagements(self, new_engagements: List[EngagementSystemData]) -> None:
         if not new_engagements:
             return
 
-        channel_id = 0 # Need to make this dynamic
-
-        channel = await self.bot.retrieve_channel(channel_id)
+        channel = await self._get_engagement_alert_channel()
         if not channel:
-            self.bot.logger.error("Engagement alert channel not found!")
+            self.bot.logger.error("Engagement alert channel not found — skipping alerts.")
             return
 
         for engagement in new_engagements:

@@ -85,6 +85,16 @@ class CacheManager:
         async with self._active_engagements_lock:
             return dict(self.__active_engagements)
 
+    async def update_active_engagement(self, engagement_id: int, engagement_data: EngagementSystemData) -> None:
+        """Write-through update for a single active engagement."""
+        async with self._active_engagements_lock:
+            self.__active_engagements[engagement_id] = engagement_data
+
+    async def update_galaxy_system_cache(self, system_id: int, galaxy_system: models.GalaxySystem) -> None:
+        """Write-through update for a single galaxy system in the in-memory cache."""
+        async with self._galaxy_systems_lock:
+            self.__galaxy_systems[system_id] = galaxy_system
+
     # ------------------------------------------------------------------
     # Galaxy system cache
     # ------------------------------------------------------------------
@@ -429,11 +439,7 @@ class CacheManager:
 
     async def remove_engagement_from_cache(self, engagement_id: int) -> bool:
         async with self._active_engagements_lock:
-            if engagement_id in self._active_engagements:
-                del self._active_engagements[engagement_id]
+            if engagement_id in self.__active_engagements:
+                del self.__active_engagements[engagement_id]
                 return True
             return False
-
-    async def update_active_engagement(self, engagement_id: int, data: EngagementSystemData) -> None:
-        async with self._active_engagements_lock:
-            self._active_engagements[engagement_id] = data

@@ -193,3 +193,12 @@ async def get_alert_channel(session: AsyncSession, guild_id: int, channel_type: 
     result = await session.exec(stmt)
     return result.first()
 
+
+async def get_all_alert_channels(session: AsyncSession, channel_type: str = "engagements") -> List[models.AlertChannelDB]:
+    """Returns all AlertChannel rows for the given channel type across all guilds."""
+    result = await session.exec(
+        select(models.AlertChannelDB).where(models.AlertChannelDB.channel_type == channel_type)
+    )
+    return list(result.all())
+
+
