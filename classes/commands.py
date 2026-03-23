@@ -51,10 +51,12 @@ class Commands(commands.Cog):
             owner = system.get('owner') or "Unknown"
             groups.setdefault(owner, []).append(system)
 
-        # Within each group: attackable (cooldown_seconds == 0) first, then sorted by cooldown_seconds asc
+        # Within each group: under attack first, attackable (cooldown_seconds == 0) first, then sorted by cooldown_seconds asc
         def sort_key(s):
+            if s.get('under_attack'):
+                return (0, 0)
             secs = s.get('cooldown_seconds', 0)
-            return (0 if secs == 0 else 1, secs)
+            return (1 if secs == 0 else 2, secs)
 
         for owner in groups:
             groups[owner].sort(key=sort_key)
@@ -81,7 +83,12 @@ class Commands(commands.Cog):
             systems = groups[owner]
             block = [f"**{owner}**"]
             for system in systems:
-                icon = "🟢" if system.get('cooldown_seconds', 0) == 0 else "🔴"
+                if system.get('under_attack'):
+                    icon = "🟡"
+                elif system.get('cooldown_seconds', 0) == 0:
+                    icon = "🟢"
+                else:
+                    icon = "🔴"
                 block.append(f"{icon} {system['name']} • {system['cooldown']}")
             all_blocks.append(block)
 
@@ -121,7 +128,7 @@ class Commands(commands.Cog):
                 value = value[:1021] + "…"
             embed.add_field(name="\u200b", value=value, inline=True)
 
-        embed.set_footer(text="🟢 Attackable NOW  •  🔴 On cooldown")
+        embed.set_footer(text="🟢 Attackable NOW  •  🟡 Active Engagement  •  🔴 On cooldown")
         embed.timestamp = discord.utils.utcnow()
 
         await interaction.channel.send(embed=embed)

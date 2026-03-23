@@ -31,6 +31,9 @@ async def get_fleet_wars_status(bot: "FleetToolsBot") -> List[Dict]:
     now = datetime.now(tz=timezone.utc)
     systems_data = []
 
+    engagement_snapshot = await bot.cache_manager.get_active_engagements_snapshot()
+    active_engagement_system_ids: set[int] = {eng.system_id for eng in engagement_snapshot.values()}
+
     for system_id, system_name in STAR_SYSTEMS.items():
         try:
             # Get data from cache (will use Fleet Wars cache if tracked, galaxy cache otherwise)
@@ -49,11 +52,14 @@ async def get_fleet_wars_status(bot: "FleetToolsBot") -> List[Dict]:
                 continue
 
             owner_name, cooldown_end = result
+            is_under_attack = system_id in active_engagement_system_ids
             cooldown_end = _ensure_aware(cooldown_end)
 
             # Format cooldown status
             cooldown_secs = 0
-            if cooldown_end:
+            if is_under_attack:
+                cooldown_status = "⚔️"
+            elif cooldown_end:
                 time_remaining = cooldown_end - now
                 remaining_secs = time_remaining.total_seconds()
 
@@ -63,15 +69,16 @@ async def get_fleet_wars_status(bot: "FleetToolsBot") -> List[Dict]:
                     cooldown_status = f"{hours}h {minutes}m"
                     cooldown_secs = int(remaining_secs)
                 else:
-                    cooldown_status = "⚔️ NOW"
+                    cooldown_status = "Open"
             else:
-                cooldown_status = "⚔️ NOW"
+                cooldown_status = "Open"
 
             systems_data.append({
                 'name': system_name,
                 'owner': owner_name,
                 'cooldown': cooldown_status,
-                'cooldown_seconds': cooldown_secs
+                'cooldown_seconds': cooldown_secs,
+                'under_attack': is_under_attack
             })
 
         except Exception as e:
@@ -80,7 +87,8 @@ async def get_fleet_wars_status(bot: "FleetToolsBot") -> List[Dict]:
                 'name': system_name,
                 'owner': "Error",
                 'cooldown': "Error",
-                'cooldown_seconds': 0
+                'cooldown_seconds': 0,
+                'under_attack': False
             })
 
     await bot.cache_manager.save_fleet_wars_systems()
