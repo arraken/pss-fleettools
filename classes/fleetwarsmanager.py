@@ -615,33 +615,33 @@ class FleetWarsManager:
         existing_systems: Dict[int, GalaxySystem] = await self.bot.database_manager.get_all_galaxy_systems()
 
         systems_to_refresh = FWH.get_systems_to_refresh(existing_systems, active_engagement_system_ids, now, force_refresh_all)
-        # Determine which systems to refresh
-        if force_refresh_all:
-            # Refresh all known systems
-            systems_to_refresh = list(STAR_SYSTEMS.keys())
-        else:
-            # Get active engagement system IDs from in-memory cache
+        # # Determine which systems to refresh
+        # if force_refresh_all:
+        #     # Refresh all known systems
+        #     systems_to_refresh = list(STAR_SYSTEMS.keys())
+        # else:
+        #     # Get active engagement system IDs from in-memory cache
 
-            for system_id in STAR_SYSTEMS.keys():
-                if system_id in existing_systems:
-                    system = existing_systems[system_id]
+        #     for system_id in STAR_SYSTEMS.keys():
+        #         if system_id in existing_systems:
+        #             system = existing_systems[system_id]
 
-                    # Always refresh systems with an active engagement so we
-                    # pick up EngagementCooldownEndDate the cycle after it ends
-                    if system_id in active_engagement_system_ids:
-                        systems_to_refresh.append(system_id)
-                        continue
+        #             # Always refresh systems with an active engagement so we
+        #             # pick up EngagementCooldownEndDate the cycle after it ends
+        #             if system_id in active_engagement_system_ids:
+        #                 systems_to_refresh.append(system_id)
+        #                 continue
 
-                    if system.cooldown_end is None:
-                        systems_to_refresh.append(system_id)
-                    else:
-                        cooldown_aware = system.cooldown_end.replace(
-                            tzinfo=timezone.utc) if system.cooldown_end.tzinfo is None else system.cooldown_end
-                        time_until_cooldown = (cooldown_aware - now).total_seconds() / 60
-                        if time_until_cooldown < 30:
-                            systems_to_refresh.append(system_id)
-                else:
-                    systems_to_refresh.append(system_id)
+        #             if system.cooldown_end is None:
+        #                 systems_to_refresh.append(system_id)
+        #             else:
+        #                 cooldown_aware = system.cooldown_end.replace(
+        #                     tzinfo=timezone.utc) if system.cooldown_end.tzinfo is None else system.cooldown_end
+        #                 time_until_cooldown = (cooldown_aware - now).total_seconds() / 60
+        #                 if time_until_cooldown < 30:
+        #                     systems_to_refresh.append(system_id)
+        #         else:
+        #             systems_to_refresh.append(system_id)
 
         self.bot.logger.info(f"Refreshing {len(systems_to_refresh)} systems...")
 
