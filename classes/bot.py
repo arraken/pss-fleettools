@@ -46,7 +46,7 @@ class FleetToolsBot(commands.Bot):
         if self.user:
             self.logger.info(f"Logged in as {self.user} ({self.user.id})")
 
-    async def retrieve_channel(self, channel_id: int) -> Optional[Union[discord.guild.GuildChannel, discord.Thread, discord.abc.PrivateChannel]]:
+    async def retrieve_channel(self, channel_id: int) -> Optional[Union[discord.abc.GuildChannel, discord.Thread, discord.abc.PrivateChannel]]:
         """Fetch a channel by ID from cache, falling back to an API call."""
         if not channel_id:
             return None
