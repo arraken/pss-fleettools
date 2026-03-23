@@ -7,9 +7,8 @@ import discord
 from discord.ext import commands, tasks
 
 from data.constants.galaxy import STAR_SYSTEMS
-from handlers import fleetwarshandler, databasehandler
-from data.databaseclasses import EngagementSystemData
-from handlers.databasehandler import get_session
+from handlers import fleetwarshandler
+from classes.databaseclasses import EngagementSystemData
 
 if TYPE_CHECKING:
     from classes.bot import FleetToolsBot
@@ -96,8 +95,8 @@ class TimerMonitor(commands.Cog):
 
     async def _engagements_pulse_inner(self):
         self.bot.logger.info(f"Starting engagements pulse at {datetime.now(timezone.utc).isoformat()}")
-        await fleetwarshandler.prune_expired_engagements(self.bot)
-        new_engagements = await fleetwarshandler.get_active_engagements(self.bot)
+        await self.bot.fleetwars_manager.prune_expired_engagements()
+        new_engagements = await self.bot.fleetwars_manager.get_active_engagements()
         await self.check_and_alert_new_engagements(new_engagements)
         await self.sync_active_engagements_from_db()
 
@@ -105,23 +104,21 @@ class TimerMonitor(commands.Cog):
         self.bot.logger.info("Galaxy State Refresh: Updating system ownership and cooldowns...")
         refreshed = 0
         try:
-            refreshed = await fleetwarshandler.refresh_galaxy_state(self.bot, force_refresh_all=False)
+            refreshed = await self.bot.fleetwars_manager.refresh_galaxy_state()
             print(f"Galaxy state refresh completed. Updated {refreshed} systems.")
         except Exception as e:
             print(f"Error in galaxy state refresh: {e}")
 
     async def sync_active_engagements_from_db(self) -> int:
         try:
-            async with get_session() as session:
-                db_active = await databasehandler.get_all_active_engagements(session)  # Dict[int, Engagement]
-
+            db_active_engagements = await self.bot.database_manager.get_all_active_engagements()
             new_map: dict[int, EngagementSystemData] = {}
-            for eid, db_eng in db_active.items():
+            for engagement_id, db_engagement in db_active_engagements.items():
                 try:
-                    eng_data = EngagementSystemData.from_db_model(db_eng)
-                    new_map[eid] = eng_data
+                    eng_data = EngagementSystemData.from_db_model(db_engagement)
+                    new_map[engagement_id] = eng_data
                 except Exception as e:
-                    self.bot.logger.info(f"Skipping engagement {eid} during sync: {e}")
+                    self.bot.logger.info(f"Skipping engagement {engagement_id} during sync: {e}")
 
             # Preferred API on CacheManager
             if hasattr(self.bot.cache_manager, "replace_active_engagements"):
@@ -151,8 +148,7 @@ class TimerMonitor(commands.Cog):
     async def _load_admin_role_mapping(self) -> None:
         """Populate admin_role_mapping from the fleet_role_mappings DB table."""
         try:
-            async with get_session() as session:
-                rows = await databasehandler.get_all_fleet_role_mappings(session)
+            rows = await self.bot.database_manager.get_all_fleet_role_mappings()
             self.admin_role_mapping = {
                 name: {"admin_id": row.admin_role_id}
                 for name, row in rows.items()
@@ -164,8 +160,7 @@ class TimerMonitor(commands.Cog):
     async def _get_engagement_alert_channel(self):
         """Resolve the engagement alert channel from the DB."""
         try:
-            async with get_session() as session:
-                rows = await databasehandler.get_all_alert_channels(session, channel_type="engagements")
+            rows = await self.bot.database_manager.get_all_alert_channels(channel_type="engagements")
             for row in rows:
                 channel = await self.bot.retrieve_channel(row.channel_id)
                 if channel:
@@ -261,11 +256,16 @@ class TimerMonitor(commands.Cog):
 
             # Only send role_mention if the engagement is < 10 minutes from starting because database stuff is being weird and sometimes engagements are detected late and we don't want to ping for old engagements
             engagement_age = datetime.now(timezone.utc) - engagement.start_time
+            if not isinstance(channel, discord.abc.Messageable):
+                return
+
             if admin_role_id and engagement_age < timedelta(minutes=10) and engagement.engagement_type != "raiding":
                 role_mention = f"<@&{admin_role_id}>, RED ALERT - SHIELDS TO FULL"
                 await channel.send(role_mention, embed=embed)
                 if admin_role_id == 1478848490237989057: # If it's Dynasty ping Spoeb in dev server
                     dev_channel = await self.bot.retrieve_channel(1389338216099745862)
+                    if not isinstance(dev_channel, discord.abc.Messageable):
+                        return
                     await dev_channel.send(role_mention, embed=embed)
             else:
                 # Send without role mention

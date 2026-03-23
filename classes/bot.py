@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 import discord
 from discord.ext import commands
@@ -12,8 +12,8 @@ class FleetToolsBot(commands.Bot):
 
         self.logger = logging.getLogger("FleetWarsBot")
         # These are set during setup_hook after the engine is ready
-        self.api_manager = None
-        self.cache_manager = None
+        #self.api_manager = None
+        #self.cache_manager = None
 
     async def setup_hook(self) -> None:
         #from handlers.databasehandler import init_engine
@@ -22,16 +22,19 @@ class FleetToolsBot(commands.Bot):
         from classes.commands import Commands
         from cogs.timermonitor import TimerMonitor
         from database import DatabaseManager
+        from classes.fleetwarsmanager import FleetWarsManager
 
         self.database_manager = DatabaseManager(self)
         await self.database_manager.async_init()
         #await init_engine()
 
-        self.api_manager = ApiManager(self)
-        self.cache_manager = CacheManager(self)
+        self.api_manager: ApiManager = ApiManager(self)
 
+        self.cache_manager: CacheManager = CacheManager(self)
         await self.cache_manager.load_active_engagements_from_db()
         await self.cache_manager.load_galaxy_systems_from_db()
+
+        self.fleetwars_manager: FleetWarsManager = FleetWarsManager(self)
 
         await self.add_cog(TimerMonitor(self))
         await self.add_cog(Commands(self))
@@ -40,9 +43,10 @@ class FleetToolsBot(commands.Bot):
         self.logger.info("Command tree synced.")
 
     async def on_ready(self) -> None:
-        self.logger.info(f"Logged in as {self.user} ({self.user.id})")
+        if self.user:
+            self.logger.info(f"Logged in as {self.user} ({self.user.id})")
 
-    async def retrieve_channel(self, channel_id: int) -> Optional[discord.TextChannel]:
+    async def retrieve_channel(self, channel_id: int) -> Optional[Union[discord.guild.GuildChannel, discord.Thread, discord.abc.PrivateChannel]]:
         """Fetch a channel by ID from cache, falling back to an API call."""
         if not channel_id:
             return None
@@ -52,5 +56,6 @@ class FleetToolsBot(commands.Bot):
                 channel = await self.fetch_channel(channel_id)
             except Exception:
                 return None
+
         return channel
 

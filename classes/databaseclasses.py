@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database.models import Engagement, GalaxySystem
+from handlers import databasehandlers as DBH
 
 
 @dataclass
@@ -19,8 +20,8 @@ class EngagementSystemData:
     engagement_type: str
 
     def to_db_model(self) -> Engagement:
-        start = _ensure_aware(self.start_time)
-        end = _ensure_aware(self.end_time)
+        start = DBH.ensure_aware(self.start_time)
+        end = DBH.ensure_aware(self.end_time)
         return Engagement(
             engagement_id=self.engagement_id,
             system_id=self.system_id,
@@ -37,8 +38,8 @@ class EngagementSystemData:
 
     @classmethod
     def from_db_model(cls, db_engagement: Engagement) -> "EngagementSystemData":
-        start = _ensure_aware(db_engagement.start_time)
-        end = _ensure_aware(db_engagement.end_time)
+        start = DBH.ensure_aware(db_engagement.start_time)
+        end = DBH.ensure_aware(db_engagement.end_time)
         return cls(
             engagement_id=db_engagement.engagement_id,
             system_id=db_engagement.system_id,
@@ -64,9 +65,3 @@ class FleetWarsSystem:
     last_api_check: datetime
     owner_name: str
     admin_role_id: Optional[int] = None
-
-
-def _ensure_aware(dt: datetime) -> datetime:
-    if dt is None:
-        return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)

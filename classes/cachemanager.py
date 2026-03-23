@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from database import models
 from data.constants.galaxy import STAR_SYSTEMS
-from data.databaseclasses import EngagementSystemData
+from classes.databaseclasses import EngagementSystemData
 from handlers.prestigehandler import CrewMember, PrestigeRecipe
-from handlers import databasehandler as crud
-from handlers.databasehandler import get_session
+#from handlers import databasehandler as crud
+#from handlers.databasehandler import get_session
 
 if TYPE_CHECKING:
     from classes.bot import FleetToolsBot
@@ -64,16 +64,15 @@ class CacheManager:
     # ------------------------------------------------------------------
 
     async def load_active_engagements_from_db(self) -> None:
-        async with get_session() as session:
-            db_active = await crud.get_all_active_engagements(session)
+        db_active_engagements = await self.bot.database_manager.get_all_active_engagements()
 
         async with self._active_engagements_lock:
             self.__active_engagements.clear()
-            for eid, db_eng in db_active.items():
+            for engagement_id, db_engagement in db_active_engagements.items():
                 try:
-                    self.__active_engagements[eid] = EngagementSystemData.from_db_model(db_eng)
+                    self.__active_engagements[engagement_id] = EngagementSystemData.from_db_model(db_engagement)
                 except Exception as e:
-                    self.bot.logger.error(f"Error loading engagement {eid} from DB: {e}")
+                    self.bot.logger.error(f"Error loading engagement {engagement_id} from DB: {e}")
 
     async def replace_active_engagements(self, new_map: Dict[int, EngagementSystemData]) -> None:
         async with self._active_engagements_lock:
@@ -100,8 +99,7 @@ class CacheManager:
     # ------------------------------------------------------------------
 
     async def load_galaxy_systems_from_db(self) -> None:
-        async with get_session() as session:
-            systems = await crud.get_all_galaxy_systems(session)
+        systems = await self.bot.database_manager.get_all_galaxy_systems()
 
         async with self._galaxy_systems_lock:
             self.__galaxy_systems = systems
@@ -183,7 +181,7 @@ class CacheManager:
 
         # Cache miss or stale — fetch from API
         try:
-            galaxy_data = await self.bot.api_manager.get_galaxy_data(system_id)
+            galaxy_data = await self.bot.api_manager.get_galaxy_system_data(system_id)
             if galaxy_data is None:
                 return None
 
@@ -219,8 +217,7 @@ class CacheManager:
                     )
                     self.__galaxy_systems[system_id] = existing
 
-            async with get_session() as session:
-                await crud.upsert_galaxy_system(session, existing)
+            await self.bot.database_manager.upsert_galaxy_system(existing)
 
             return owner_name, cooldown_end
 
@@ -347,7 +344,7 @@ class CacheManager:
         for crew in crew_list:
             crew_member = CrewMember(
                 name=crew.character_design_name,
-                crew_id=0,
+                crew_id="0",
                 design_id=crew.character_design_id,
                 rarity=crew.rarity,
                 special=crew.special_ability_final_argument,

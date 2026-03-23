@@ -152,7 +152,7 @@ class ApiManager:
 
         return await self._make_api_call(_call, allow_token_refresh=False, max_retries=0)
 
-    async def get_galaxy_data(self, system_id: int):
+    async def get_galaxy_system_data(self, system_id: int):
         production_server = await self.client.get_production_server()
 
         async def _call():

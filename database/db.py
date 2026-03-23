@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Dict, List, Optional, Sequence, TYPE_CHECKING
 
+from pssapi.entities.raw import EngagementRaw
 from sqlalchemy import or_
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -10,6 +11,9 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from data.constants.galaxy import STAR_SYSTEMS
+from handlers import databasehandlers as DBH
+from classes.databaseclasses import EngagementSystemData
 
 DATABASE_URL = "sqlite+aiosqlite:///./data/fleetwars.db"
 
@@ -98,7 +102,10 @@ class DatabaseManager():
     async def async_init(self):
         await self.__set_up_db_engine(DATABASE_URL)
     # -------------------------------------------- ENGAGEMENTS --------------------------------------------------------------
-    async def add_engagement(self, db_engagement: models.Engagement) -> bool:
+    async def add_engagement(self, db_engagement: models.Engagement | EngagementSystemData) -> bool:
+        if isinstance(db_engagement, EngagementSystemData):
+            db_engagement = db_engagement.to_db_model()
+
         async with self.__session() as session:
             return await crud.upsert_engagement(session, db_engagement)
 
@@ -121,8 +128,17 @@ class DatabaseManager():
     async def get_engagements_by_fleet(self, fleet_name: str, active_only: bool = False) -> Sequence[models.Engagement]:
         async with self.__session() as session:
             return await crud.get_engagements_by_fleet(session, fleet_name, active_only)
+
+    async def get_expired_engagments(self) -> Dict[int, models.Engagement]: 
+        async with self.__session() as session:
+            return await crud.get_expired_engagements(session)
+        
+    async def count_active_engagements(self) -> int:
+        async with self.__session() as session:
+            return await crud.count_active_engagements(session)
+
     # -------------------------------------------- GALAXY DATA --------------------------------------------------------------
-    async def add_galaxy_system(self, galaxy_system: models.GalaxySystem) -> bool:
+    async def upsert_galaxy_system(self, galaxy_system: models.GalaxySystem) -> bool:
         async with self.__session() as session:
             return await crud.upsert_galaxy_system(session, galaxy_system)
 
@@ -141,6 +157,15 @@ class DatabaseManager():
     async def clear_system_target_by_fleet_id(self, system_id: int, fleet_id: int) -> bool:
         async with self.__session() as session:
             return await crud.clear_system_target_by_fleet_id(session, system_id, fleet_id)
+        
+    async def mark_system_under_attack(self, engagement_data: EngagementSystemData) -> models.GalaxySystem | None:
+        async with self.__session() as session:
+            return await crud.mark_system_under_attack(session, engagement_data)
+
+    async def deactivate_under_attack_system(self, system_id: int) -> models.GalaxySystem | None:
+        async with self.__session() as session:
+            return await crud.deactivate_under_attack_system(session, system_id)
+
     #     # -------------------------------------------- DISCORD DATA --------------------------------------------------------------
 
     async def get_all_fleet_role_mappings(self) -> Dict[str, models.FleetRoleMappingDB]:
@@ -150,6 +175,13 @@ class DatabaseManager():
     async def get_alert_channel(self, guild_id: int, channel_type: str = "engagements") -> Optional[models.AlertChannelDB]:
         async with self.__session() as session:
             return await crud.get_alert_channel(session, guild_id, channel_type)
+    async def get_all_alert_channels(self, channel_type: str = "engagements") -> List[models.AlertChannelDB]:
+        """Returns all AlertChannel rows for the given channel type across all guilds."""
+        async with self.__session() as session:
+            result = await session.exec(
+                select(models.AlertChannelDB).where(models.AlertChannelDB.channel_type == channel_type)
+            )
+            return list(result.all())
     # ----------------------------------------------------------------------------------------------------------
     def __session(self):
         return AsyncAutoRollbackSession(self.__engine)

@@ -19,7 +19,7 @@ class Commands(commands.Cog):
         await interaction.response.defer()
         try:
             active = self.bot.cache_manager._CacheManager__active_engagements
-            embed = await fleetwarshandler.create_engagement_embed_option(active)
+            embed = await self.bot.fleetwars_manager.create_engagement_embed_option(active)
             await interaction.followup.send(embed=embed)
         except Exception as e:
             self.bot.logger.error(f"Error in /engagements: {e}", exc_info=e)
@@ -30,7 +30,7 @@ class Commands(commands.Cog):
     async def engagement_stats(self, interaction: discord.Interaction, engagement_id: int) -> None:
         await interaction.response.defer()
         try:
-            embed, view = await fleetwarshandler.create_engagement_detail_embed(self.bot, engagement_id)
+            embed, view = await self.bot.fleetwars_manager.create_engagement_detail_embed(engagement_id)
             if view:
                 await interaction.followup.send(embed=embed, view=view)
             else:
@@ -43,7 +43,7 @@ class Commands(commands.Cog):
     async def galaxy_status(self, interaction: discord.Interaction):
         await interaction.response.defer()
         await interaction.followup.send("🔄 Fetching galaxy data for all systems... This may take a moment.", ephemeral=True)
-        systems_data = await fleetwarshandler.get_fleet_wars_status(self.bot)
+        systems_data = await self.bot.fleetwars_manager.get_fleet_wars_status()
 
         # Group systems by owner
         groups: dict[str, list] = {}

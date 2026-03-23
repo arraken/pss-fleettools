@@ -5,4 +5,4 @@ sqlmodel>=0.0.14
 sqlalchemy[asyncio]>=2.0.0
 aiosqlite
 icecream
-
+fuzzywuzzy
