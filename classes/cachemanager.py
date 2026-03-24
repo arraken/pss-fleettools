@@ -32,7 +32,7 @@ class CacheManager:
     def __init__(self, bot: "FleetToolsBot"):
         self.bot = bot
         self.__active_engagements: Dict[int, EngagementSystemData] = {}
-        self.__galaxy_systems: Dict[int, models.GalaxySystem] = {}
+        self.__galaxy_systems: Dict[int, models.GalaxySystemDB] = {}
         self._active_engagements_lock = asyncio.Lock()
         self._CacheManager__active_engagements = self.__active_engagements
         self._galaxy_systems_lock = asyncio.Lock()
@@ -89,7 +89,7 @@ class CacheManager:
         async with self._active_engagements_lock:
             self.__active_engagements[engagement_id] = engagement_data
 
-    async def update_galaxy_system_cache(self, system_id: int, galaxy_system: models.GalaxySystem) -> None:
+    async def update_galaxy_system_cache(self, system_id: int, galaxy_system: models.GalaxySystemDB) -> None:
         """Write-through update for a single galaxy system in the in-memory cache."""
         async with self._galaxy_systems_lock:
             self.__galaxy_systems[system_id] = galaxy_system
@@ -104,54 +104,54 @@ class CacheManager:
         async with self._galaxy_systems_lock:
             self.__galaxy_systems = systems
 
-    async def load_fleet_wars_systems_from_json(self) -> None:
-        """Populate __galaxy_systems from fleet_wars_systems.json."""
-        data = self.load_json("fleet_wars_systems")
-        async with self._galaxy_systems_lock:
-            self.__galaxy_systems.clear()
-            for key, value in data.items():
-                try:
-                    system_id = int(key)
-                    cooldown_end: Optional[datetime] = None
-                    if value.get("cooldown_end"):
-                        cooldown_end = datetime.fromisoformat(value["cooldown_end"])
-                        if cooldown_end.tzinfo is None:
-                            cooldown_end = cooldown_end.replace(tzinfo=timezone.utc)
+    # async def load_fleet_wars_systems_from_json(self) -> None:
+    #     """Populate __galaxy_systems from fleet_wars_systems.json."""
+    #     data = self.load_json("fleet_wars_systems")
+    #     async with self._galaxy_systems_lock:
+    #         self.__galaxy_systems.clear()
+    #         for key, value in data.items():
+    #             try:
+    #                 system_id = int(key)
+    #                 cooldown_end: Optional[datetime] = None
+    #                 if value.get("cooldown_end"):
+    #                     cooldown_end = datetime.fromisoformat(value["cooldown_end"])
+    #                     if cooldown_end.tzinfo is None:
+    #                         cooldown_end = cooldown_end.replace(tzinfo=timezone.utc)
 
-                    last_updated = datetime.now(timezone.utc)
-                    if value.get("last_updated"):
-                        last_updated = datetime.fromisoformat(value["last_updated"])
-                        if last_updated.tzinfo is None:
-                            last_updated = last_updated.replace(tzinfo=timezone.utc)
+    #                 last_updated = datetime.now(timezone.utc)
+    #                 if value.get("last_updated"):
+    #                     last_updated = datetime.fromisoformat(value["last_updated"])
+    #                     if last_updated.tzinfo is None:
+    #                         last_updated = last_updated.replace(tzinfo=timezone.utc)
 
-                    system = models.GalaxySystem(
-                        system_id=system_id,
-                        system_name=value.get(
-                            "system_name",
-                            STAR_SYSTEMS.get(system_id, f"System {system_id}"),
-                        ),
-                        owner_name=value.get("owner_name"),
-                        cooldown_end=cooldown_end,
-                        last_updated=last_updated,
-                        is_targeted=value.get("is_targeted", False),
-                    )
-                    self.__galaxy_systems[system_id] = system
-                except Exception as e:
-                    self.bot.logger.error(f"Error loading galaxy system {key} from JSON: {e}")
+    #                 system = models.GalaxySystemDB(
+    #                     system_id=system_id,
+    #                     system_name=value.get(
+    #                         "system_name",
+    #                         STAR_SYSTEMS.get(system_id, f"System {system_id}"),
+    #                     ),
+    #                     owner_name=value.get("owner_name"),
+    #                     cooldown_end=cooldown_end,
+    #                     last_updated=last_updated,
+    #                     is_targeted=value.get("is_targeted", False),
+    #                 )
+    #                 self.__galaxy_systems[system_id] = system
+    #             except Exception as e:
+    #                 self.bot.logger.error(f"Error loading galaxy system {key} from JSON: {e}")
 
-    def save_fleet_wars_systems_to_json(self) -> bool:
-        """Persist __galaxy_systems to fleet_wars_systems.json."""
-        data: Dict[str, Any] = {}
-        for system_id, system in self.__galaxy_systems.items():
-            data[str(system_id)] = {
-                "system_id": system.system_id,
-                "system_name": system.system_name,
-                "owner_name": system.owner_name,
-                "cooldown_end": system.cooldown_end.isoformat() if system.cooldown_end else None,
-                "last_updated": system.last_updated.isoformat() if system.last_updated else None,
-                "is_targeted": system.is_targeted,
-            }
-        return self.save_json("fleet_wars_systems", data)
+    # def save_fleet_wars_systems_to_json(self) -> bool:
+    #     """Persist __galaxy_systems to fleet_wars_systems.json."""
+    #     data: Dict[str, Any] = {}
+    #     for system_id, system in self.__galaxy_systems.items():
+    #         data[str(system_id)] = {
+    #             "system_id": system.system_id,
+    #             "system_name": system.system_name,
+    #             "owner_name": system.owner_name,
+    #             "cooldown_end": system.cooldown_end.isoformat() if system.cooldown_end else None,
+    #             "last_updated": system.last_updated.isoformat() if system.last_updated else None,
+    #             "is_targeted": system.is_targeted,
+    #         }
+    #     return self.save_json("fleet_wars_systems", data)
 
     async def save_fleet_wars_systems(self) -> None:
         """Hook for any additional cache-level save logic.
@@ -208,7 +208,7 @@ class CacheManager:
                     existing.last_updated = now
                 else:
                     system_name = STAR_SYSTEMS.get(system_id, f"System {system_id}")
-                    existing = models.GalaxySystem(
+                    existing = models.GalaxySystemDB(
                         system_id=system_id,
                         system_name=system_name,
                         owner_name=owner_name,

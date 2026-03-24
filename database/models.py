@@ -3,11 +3,11 @@ from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
-class Engagement(SQLModel, table=True):
+class EngagementDB(SQLModel, table=True):
     __tablename__ = "engagements"
 
     engagement_id: int = Field(primary_key=True)
-    system_id: int = Field(index=True)
+    system_id: int = Field(foreign_key="galaxy_systems.system_id", index=True)
     attacker: str = Field(index=True)
     defender: str = Field(index=True)
     engagement_type: str
@@ -20,7 +20,7 @@ class Engagement(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class GalaxySystem(SQLModel, table=True):
+class GalaxySystemDB(SQLModel, table=True):
     __tablename__ = "galaxy_systems"
 
     system_id: int = Field(primary_key=True)

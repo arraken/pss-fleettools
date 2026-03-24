@@ -102,14 +102,14 @@ class DatabaseManager():
     async def async_init(self):
         await self.__set_up_db_engine(DATABASE_URL)
     # -------------------------------------------- ENGAGEMENTS --------------------------------------------------------------
-    async def add_engagement(self, db_engagement: models.Engagement | EngagementSystemData) -> bool:
+    async def add_engagement(self, db_engagement: models.EngagementDB | EngagementSystemData) -> bool:
         if isinstance(db_engagement, EngagementSystemData):
             db_engagement = db_engagement.to_db_model()
 
         async with self.__session() as session:
             return await crud.upsert_engagement(session, db_engagement)
 
-    async def get_all_active_engagements(self) -> Dict[int, models.Engagement]:
+    async def get_all_active_engagements(self) -> Dict[int, models.EngagementDB]:
         async with self.__session() as session:
             return await crud.get_all_active_engagements(session)
 
@@ -121,15 +121,15 @@ class DatabaseManager():
         async with self.__session() as session:
             return await crud.mark_engagement_inactive(session, engagement_id)
 
-    async def get_engagements_by_system(self, system_id: int, active_only: bool = False) -> Sequence[models.Engagement]:
+    async def get_engagements_by_system(self, system_id: int, active_only: bool = False) -> Sequence[models.EngagementDB]:
         async with self.__session() as session:
             return await crud.get_engagements_by_system(session, system_id, active_only)
 
-    async def get_engagements_by_fleet(self, fleet_name: str, active_only: bool = False) -> Sequence[models.Engagement]:
+    async def get_engagements_by_fleet(self, fleet_name: str, active_only: bool = False) -> Sequence[models.EngagementDB]:
         async with self.__session() as session:
             return await crud.get_engagements_by_fleet(session, fleet_name, active_only)
 
-    async def get_expired_engagments(self) -> Dict[int, models.Engagement]: 
+    async def get_expired_engagments(self) -> Dict[int, models.EngagementDB]: 
         async with self.__session() as session:
             return await crud.get_expired_engagements(session)
         
@@ -138,19 +138,19 @@ class DatabaseManager():
             return await crud.count_active_engagements(session)
 
     # -------------------------------------------- GALAXY DATA --------------------------------------------------------------
-    async def upsert_galaxy_system(self, galaxy_system: models.GalaxySystem) -> bool:
+    async def upsert_galaxy_system(self, galaxy_system: models.GalaxySystemDB) -> bool:
         async with self.__session() as session:
             return await crud.upsert_galaxy_system(session, galaxy_system)
 
-    async def get_galaxy_system(self, system_id: int) -> Optional[models.GalaxySystem]:
+    async def get_galaxy_system(self, system_id: int) -> Optional[models.GalaxySystemDB]:
         async with self.__session() as session:
             return await crud.get_galaxy_system(session, system_id)
 
-    async def get_all_galaxy_systems(self) -> Dict[int, models.GalaxySystem]:
+    async def get_all_galaxy_systems(self) -> Dict[int, models.GalaxySystemDB]:
         async with self.__session() as session:
             return await crud.get_all_galaxy_systems(session)
 
-    async def get_targeted_galaxy_systems(self) -> Dict[int, models.GalaxySystem]:
+    async def get_targeted_galaxy_systems(self) -> Dict[int, models.GalaxySystemDB]:
         async with self.__session() as session:
             return await crud.get_targeted_galaxy_systems(session)
 
@@ -158,11 +158,11 @@ class DatabaseManager():
         async with self.__session() as session:
             return await crud.clear_system_target_by_fleet_id(session, system_id, fleet_id)
         
-    async def mark_system_under_attack(self, engagement_data: EngagementSystemData) -> models.GalaxySystem | None:
+    async def mark_system_under_attack(self, engagement_data: EngagementSystemData) -> models.GalaxySystemDB | None:
         async with self.__session() as session:
             return await crud.mark_system_under_attack(session, engagement_data)
 
-    async def deactivate_under_attack_system(self, system_id: int) -> models.GalaxySystem | None:
+    async def deactivate_under_attack_system(self, system_id: int) -> models.GalaxySystemDB | None:
         async with self.__session() as session:
             return await crud.deactivate_under_attack_system(session, system_id)
 

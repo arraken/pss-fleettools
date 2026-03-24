@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from handlers import fleetwarshandler
+#from handlers import fleetwarshandlers
 
 if TYPE_CHECKING:
     from classes.bot import FleetToolsBot
@@ -18,7 +18,7 @@ class Commands(commands.Cog):
     async def engagements(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         try:
-            active = self.bot.cache_manager._CacheManager__active_engagements
+            active = await self.bot.fleetwars_manager.get_active_engagements()
             embed = await self.bot.fleetwars_manager.create_engagement_embed_option(active)
             await interaction.followup.send(embed=embed)
         except Exception as e:
@@ -41,6 +41,10 @@ class Commands(commands.Cog):
 
     @app_commands.command(name="galaxy_status", description="View all star systems with cooldown times and owners")
     async def galaxy_status(self, interaction: discord.Interaction):
+
+        if not isinstance(interaction.channel, discord.abc.Messageable):
+            return # This needs to be handled properly.
+
         await interaction.response.defer()
         await interaction.followup.send("🔄 Fetching galaxy data for all systems... This may take a moment.", ephemeral=True)
         systems_data = await self.bot.fleetwars_manager.get_fleet_wars_status()
@@ -130,7 +134,7 @@ class Commands(commands.Cog):
 
         embed.set_footer(text="🟢 Attackable NOW  •  🟡 Active Engagement  •  🔴 On cooldown")
         embed.timestamp = discord.utils.utcnow()
-
+    
         await interaction.channel.send(embed=embed)
 
     @app_commands.command(name="prestige_calculator", description="Generates prestige paths (if any) for the crew for that player")

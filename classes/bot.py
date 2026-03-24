@@ -31,10 +31,10 @@ class FleetToolsBot(commands.Bot):
         self.api_manager: ApiManager = ApiManager(self)
 
         self.cache_manager: CacheManager = CacheManager(self)
-        await self.cache_manager.load_active_engagements_from_db()
-        await self.cache_manager.load_galaxy_systems_from_db()
 
         self.fleetwars_manager: FleetWarsManager = FleetWarsManager(self)
+        await self.fleetwars_manager.load_active_engagements_from_db()
+        await self.fleetwars_manager.load_galaxy_systems_from_db()
 
         await self.add_cog(TimerMonitor(self))
         await self.add_cog(Commands(self))
