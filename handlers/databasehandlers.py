@@ -11,10 +11,6 @@ from sqlmodel import SQLModel, select
 from database import models
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-
-
-
-
 #DATABASE_URL = "sqlite+aiosqlite:///./data/fleetwars.db"
 
 #_engine: AsyncEngine | None = None

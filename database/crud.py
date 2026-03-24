@@ -87,11 +87,11 @@ async def get_engagements_by_fleet(session: AsyncSession, fleet_name: str, activ
         return []
     
 async def get_expired_engagements(session: AsyncSession) -> Dict[int, models.Engagement]:
-    current_time = datetime.now(timezone.utc)
+    current_time = DBH.ensure_aware(datetime.now(timezone.utc)).replace(tzinfo=None)
     stmt = (
         select(models.Engagement)
         .where(models.Engagement.active == True)
-        .where(DBH.ensure_aware(models.Engagement.end_time) < current_time)
+        .where(col(models.Engagement.end_time) < current_time)
     )
     result = await session.exec(stmt)
     rows = result.all()

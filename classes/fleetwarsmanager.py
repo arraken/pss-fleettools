@@ -275,9 +275,9 @@ class FleetWarsManager:
             # Clear under_attack on the galaxy system so state is consistent
             # before the next galaxy_state_refresh cycle runs
             try:
-                updated_system = await self.bot.database_manager.deactivate_under_attack_system(engagement_id)
+                updated_system = await self.bot.database_manager.deactivate_under_attack_system(engagement_data.system_id)
                 if not updated_system:
-                    raise Exception
+                    raise Exception(f"Updated_system was found to be null when trying to clear under_attack for system {engagement_data.system_id}")
 
                 await self.bot.cache_manager.update_galaxy_system_cache(
                     engagement_data.system_id, updated_system

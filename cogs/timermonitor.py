@@ -105,7 +105,6 @@ class TimerMonitor(commands.Cog):
         refreshed = 0
         try:
             refreshed = await self.bot.fleetwars_manager.refresh_galaxy_state()
-            print(f"Galaxy state refresh completed. Updated {refreshed} systems.")
         except Exception as e:
             print(f"Error in galaxy state refresh: {e}")
 
