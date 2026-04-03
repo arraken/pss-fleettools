@@ -18,7 +18,7 @@ class Commands(commands.Cog):
     async def engagements(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         try:
-            active = await self.bot.fleetwars_manager.get_active_engagements()
+            active = await self.bot.fleetwars_manager.get_active_engagements_pulse()
             embed = await self.bot.fleetwars_manager.create_engagement_embed_option(active)
             await interaction.followup.send(embed=embed)
         except Exception as e:
@@ -256,7 +256,17 @@ class Commands(commands.Cog):
         embed.set_footer(text="FleetTools  •  Use / to autocomplete any command")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+        guilds_embed = discord.Embed(
+            title="Guilds List",
+            description="",
+            color=discord.Color.dark_blue(),
+        )
+        line = ""
+
         if interaction.user.id == 210545386580869121:  # Only show this debug message to the bot owner
             for guild in self.bot.guilds:
-                self.bot.logger.info(f"Found guild: {guild.name} - ID: {guild.id}")
+                line = line + f"{guild.name} - {guild.id}\n"
+        guilds_embed.add_field(name="Debug: Current Guilds", value=line or "No guilds found", inline=False)
+        await interaction.response.send_message(embed=guilds_embed, ephemeral=True)
+
 

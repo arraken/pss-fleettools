@@ -135,6 +135,104 @@ class FleetWarsManager:
 
         return formatted_systems_data
 
+    async def get_active_engagements_pulse(self) -> List[EngagementSystemData]:
+        # Get the highest engagement_id from the database to know where to start
+        last_engagement_id = await self.bot.database_manager.get_highest_engagement_id()
+
+        await self.bot.api_manager.ensure_valid_token_age()
+        await asyncio.sleep(0.5)
+
+        new_active_engagements = []
+        engagement_id = last_engagement_id + 1
+        current_time = datetime.now(timezone.utc)
+        consecutive_failures = 0
+        max_consecutive_failures = 2
+
+        while consecutive_failures < max_consecutive_failures:
+            try:
+                # Get EngagementRaw object from API
+                engagement_raw: EngagementRaw = await self.bot.api_manager.get_engagement(engagement_id)
+                await asyncio.sleep(2)
+
+                # Check if the engagement is active (end_date is in the future)
+                is_active = engagement_raw.end_date > current_time
+
+                # Determine final score
+                final_score = f"{engagement_raw.attacking_engagement_group_name} {engagement_raw.attacking_points} - {engagement_raw.defending_points} {engagement_raw.defending_engagement_group_name}"
+
+                engagement_type = getattr(engagement_raw, "engagement_type", "Unknown")
+
+                # Create EngagementSystemData object
+                engagement_data = EngagementSystemData(
+                    active=is_active,
+                    attacker=engagement_raw.attacking_engagement_group_name,
+                    defender=engagement_raw.defending_engagement_group_name,
+                    engagement_id=engagement_raw.engagement_id,
+                    system_id=engagement_raw.star_system_id,
+                    start_time=engagement_raw.start_date,
+                    end_time=engagement_raw.end_date,
+                    outcome=engagement_raw.outcome_type,
+                    final_score=final_score,
+                    engagement_type=engagement_type
+                )
+                db_engagement = engagement_data.to_db_model()
+
+                # Save to database (upsert handles both new and updates)
+                try:
+                    await self.bot.database_manager.add_engagement(db_engagement)
+                except Exception as e:
+                    self.bot.logger.error(f"Error upserting engagement {engagement_data.engagement_id}: {e}")
+
+                # Add to return list if active
+                if not is_active:
+                    continue
+
+                self.bot.logger.info(
+                    f"Active engagement found: ID {engagement_id} in system ID {engagement_raw.star_system_id}")
+                new_active_engagements.append(engagement_data)
+
+                # Update in-memory cache (write-through) via lock-safe method
+                await self.bot.cache_manager.update_active_engagement(engagement_id, engagement_data)
+
+                # Immediately mark the galaxy system as under attack so the state is
+                # accurate before the next galaxy_state_refresh cycle runs
+                try:
+                    galaxy_system = await self.bot.database_manager.mark_system_under_attack(engagement_data)
+                    if not galaxy_system:
+                        raise Exception
+                    await self.bot.cache_manager.update_galaxy_system_cache(
+                        engagement_raw.star_system_id, galaxy_system
+                    )
+                except Exception as e:
+                    self.bot.logger.warning(
+                        f"Could not mark system {engagement_raw.star_system_id} as under_attack: {e}"
+                    )
+
+                # Reset consecutive failures on success
+                consecutive_failures = 0
+                engagement_id += 1
+
+            except PssApiError as e:
+                consecutive_failures += 1
+
+                if consecutive_failures >= max_consecutive_failures:
+                    self.bot.logger.info(
+                        f"Engagement scan complete. "
+                        f"Last checked: {engagement_id - 1}. "
+                        f"Found {len(new_active_engagements)} new active engagement(s)."
+                    )
+                    break
+
+                engagement_id += 1
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                self.bot.logger.critical(f"Unexpected exception while fetching engagement {engagement_id}: {e}",
+                                         exc_info=e)
+                raise
+
+        return new_active_engagements
+
     async def prune_expired_engagements(self) -> int:
         expired_engagements: Dict[int, EngagementDB] = await self.bot.database_manager.get_expired_engagments()
         current_time = datetime.now(timezone.utc)

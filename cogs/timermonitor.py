@@ -96,7 +96,7 @@ class TimerMonitor(commands.Cog):
     async def _engagements_pulse_inner(self):
         self.bot.logger.info(f"Starting engagements pulse at {datetime.now(timezone.utc).isoformat()}")
         await self.bot.fleetwars_manager.prune_expired_engagements()
-        active_engagements = await self.bot.fleetwars_manager.get_active_engagements()
+        active_engagements = await self.bot.fleetwars_manager.get_active_engagements_pulse()
         active_engagements = [engagement for _, engagement in active_engagements.items()]
         await self.check_and_alert_new_engagements(active_engagements)
         await self.sync_active_engagements_from_db()
