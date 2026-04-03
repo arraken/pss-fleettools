@@ -16,10 +16,10 @@ from classes.views import EngagementParticipantsView
 from data.constants.galaxy import STAR_SYSTEMS
 from classes.databaseclasses import EngagementSystemData
 from database import models
-from database.models import Engagement, GalaxySystem
+from database.models import EngagementDB, GalaxySystemDB
 from handlers.prestigehandler import CrewMember, PrestigeRecipe
 from handlers import databasehandlers as DBH
-from handlers import fleetwarshandler as FWH
+from handlers import fleetwarshandlers as FWH
 
 if TYPE_CHECKING:
     from classes.bot import FleetToolsBot
@@ -34,222 +34,111 @@ DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
 class FleetWarsManager:
     def __init__(self, bot: "FleetToolsBot"):
         self.bot = bot
+        self.__active_engagements: Dict[int, EngagementSystemData] = {}
+        self.__galaxy_systems: Dict[int, models.GalaxySystemDB] = {}
+        self.__active_engagements_lock = asyncio.Lock()
+        self.__galaxy_data_lock = asyncio.Lock()
 
+    # ------------------------------------------------------------------
+    # Systems
+    # ------------------------------------------------------------------
+
+    async def load_galaxy_systems_from_db(self) -> None:
+        systems = await self.bot.database_manager.get_all_galaxy_systems()
+
+        async with self.__galaxy_data_lock:
+            self.__galaxy_systems = systems
+    # ------------------------------------------------------------------
     def get_system_id_by_name(self, system_name: str) -> Optional[int]:
-        for sid, name in STAR_SYSTEMS.items():
+        for system_id, name in STAR_SYSTEMS.items():
             if name.lower() == system_name.lower():
-                return sid
+                return system_id
         return None
 
+    async def get_system_data_by_system_id(self, system_id: int):
+        async with self.__galaxy_data_lock:
+            return self.__galaxy_systems.get(system_id)
 
-    async def get_fleet_wars_status(self) -> List[Dict]:
-        now = datetime.now(tz=timezone.utc)
-        systems_data = []
+    async def get_all_systems_data(self):
+        async with self.__galaxy_data_lock:
+            return dict(self.__galaxy_systems)
 
-        engagement_snapshot = await self.bot.cache_manager.get_active_engagements_snapshot()
-        active_engagement_system_ids: set[int] = {eng.system_id for eng in engagement_snapshot.values()}
+    async def get_system_ids_under_attack(self) -> Set[int]:
+        systems = await self.get_all_systems_data()
+        systems_under_attack = {id for id, system in systems.items() if system.under_attack}
+        return systems_under_attack
+
+    async def update_galaxy_system_cache(self, system_id: int, galaxy_system: models.GalaxySystemDB) -> None:
+        """Write-through update for a single galaxy system in the in-memory cache."""
+        async with self.__galaxy_data_lock:
+            self.__galaxy_systems[system_id] = galaxy_system
+    # ------------------------------------------------------------------
+    # Engagements
+    # ------------------------------------------------------------------
+
+    async def load_active_engagements_from_db(self) -> None:
+        db_active_engagements = await self.bot.database_manager.get_all_active_engagements()
+
+        async with self.__active_engagements_lock:
+            self.__active_engagements.clear()
+            for engagement_id, db_engagement in db_active_engagements.items():
+                try:
+                    self.__active_engagements[engagement_id] = EngagementSystemData.from_db_model(db_engagement)
+                except Exception as e:
+                    self.bot.logger.error(f"Error loading engagement {engagement_id} from DB: {e}")
+    # ------------------------------------------------------------------
+    async def get_active_engagements(self) -> Dict[int, EngagementSystemData]:
+        async with self.__active_engagements_lock:
+            return dict(self.__active_engagements)
+
+    async def replace_active_engagements(self, new_map: Dict[int, EngagementSystemData]) -> None:
+        async with self.__active_engagements_lock:
+            self.__active_engagements.clear()
+            self.__active_engagements.update(new_map)
+
+    async def update_active_engagement(self, engagement_id: int, engagement_data: EngagementSystemData) -> None:
+        """Write-through update for a single active engagement."""
+        async with self.__active_engagements_lock:
+            self.__active_engagements[engagement_id] = engagement_data
+
+    async def remove_engagement_from_cache(self, engagement_id: int) -> bool:
+        async with self.__active_engagements_lock:
+            if engagement_id in self.__active_engagements:
+                del self.__active_engagements[engagement_id]
+                return True
+            return False
+
+    # ------------------------------------------------------------------
+    # Command Response
+    # ------------------------------------------------------------------
+    async def get_fleet_wars_status(self):
+        # active_engagements:Dict[int, EngagementSystemData] = await self.get_active_engagements()
+        current_systems_data: Dict[int, GalaxySystemDB] = await self.get_all_systems_data()
+
+        formatted_systems_data = []
 
         for system_id, system_name in STAR_SYSTEMS.items():
-            try:
-                # Get data from cache (will use Fleet Wars cache if tracked, galaxy cache otherwise)
-                # Only makes API call if cache is older than 90 minutes, so we avoid missing a 30 minute timer update
-                result = await self.bot.cache_manager.get_galaxy_data_cached(
-                    system_id=system_id,
-                    max_age_minutes=90
-                )
-                if result is None:
-                    # API call failed
-                    systems_data.append({
-                        'name': system_name,
-                        'owner': "Error",
-                        'cooldown': "Error"
-                    })
-                    continue
+            system_data = current_systems_data.get(system_id)
+            if not system_data:
+                raise Exception
 
-                owner_name, cooldown_end = result
-                is_under_attack = system_id in active_engagement_system_ids                    
+            remaining_seconds = FWH.get_remaining_cooldown_seconds(system_data)
+            cooldown_status = FWH.format_cooldown_status(system_data, remaining_seconds)
 
-                # Format cooldown status
-                cooldown_secs = 0
-                if is_under_attack:
-                    cooldown_status = "⚔️"
-                elif cooldown_end:
-                    cooldown_end = DBH.ensure_aware(cooldown_end)
-                    time_remaining = cooldown_end - now
-                    remaining_secs = time_remaining.total_seconds()
+            formatted_systems_data.append({
+                'name': system_name,
+                'owner': system_data.owner_name,
+                'cooldown': cooldown_status,
+                'cooldown_seconds': remaining_seconds,
+                'under_attack': system_data.under_attack
+            })
 
-                    if remaining_secs > 0:
-                        hours = int(remaining_secs // 3600)
-                        minutes = int((remaining_secs % 3600) // 60)
-                        cooldown_status = f"{hours}h {minutes}m"
-                        cooldown_secs = int(remaining_secs)
-                    else:
-                        cooldown_status = "Open"
-                else:
-                    cooldown_status = "Open"
-
-                systems_data.append({
-                    'name': system_name,
-                    'owner': owner_name,
-                    'cooldown': cooldown_status,
-                    'cooldown_seconds': cooldown_secs,
-                    'under_attack': is_under_attack
-                })
-
-            except Exception as e:
-                self.bot.logger.error(f"Error fetching status for {system_name}: {e}")
-                systems_data.append({
-                    'name': system_name,
-                    'owner': "Error",
-                    'cooldown': "Error",
-                    'cooldown_seconds': 0,
-                    'under_attack': False
-                })
-
-        await self.bot.cache_manager.save_fleet_wars_systems()
-        return systems_data
-
-    async def get_system_status(self, system_name: str) -> Optional[Dict]:
-        system_id = self.get_system_id_by_name(system_name)
-        if system_id is None:
-            return None
-
-        now = datetime.now(tz=timezone.utc)
-
-        result = await self.bot.cache_manager.get_galaxy_data_cached(
-            system_id=system_id,
-            max_age_minutes=90
-        )
-
-        if result is None:
-            return None
-
-        owner_name, cooldown_end = result
-        # Format cooldown status
-        if cooldown_end:
-            cooldown_end = DBH.ensure_aware(cooldown_end)
-            time_remaining = cooldown_end - now
-
-            if time_remaining.total_seconds() > 0:
-                hours = int(time_remaining.total_seconds() // 3600)
-                minutes = int((time_remaining.total_seconds() % 3600) // 60)
-                cooldown_status = f"{hours}h {minutes}m"
-            else:
-                cooldown_status = "⚔️ NOW"
-        else:
-            cooldown_status = "⚔️ NOW"
-
-        return {
-            'name': system_name,
-            'owner': owner_name,
-            'cooldown': cooldown_status
-        }
-
-    async def get_active_engagements(self) -> List[EngagementSystemData]:
-        # Get the highest engagement_id from the database to know where to start
-        last_engagement_id = await self.bot.database_manager.get_highest_engagement_id()
-
-        await self.bot.api_manager.ensure_valid_token_age()
-        await asyncio.sleep(0.5)
-
-        new_active_engagements = []
-        engagement_id = last_engagement_id + 1
-        current_time = datetime.now(timezone.utc)
-        consecutive_failures = 0
-        max_consecutive_failures = 2
-
-        while consecutive_failures < max_consecutive_failures:
-            try:
-                # Get EngagementRaw object from API
-                engagement_raw: EngagementRaw = await self.bot.api_manager.get_engagement(engagement_id)
-                await asyncio.sleep(2)
-
-                # Check if the engagement is active (end_date is in the future)
-                is_active = engagement_raw.end_date > current_time
-
-                # Determine final score
-                final_score = f"{engagement_raw.attacking_engagement_group_name} {engagement_raw.attacking_points} - {engagement_raw.defending_points} {engagement_raw.defending_engagement_group_name}"
-
-                engagement_type = getattr(engagement_raw, "engagement_type", "Unknown")
-
-                # Create EngagementSystemData object
-                engagement_data = EngagementSystemData(
-                    active=is_active,
-                    attacker=engagement_raw.attacking_engagement_group_name,
-                    defender=engagement_raw.defending_engagement_group_name,
-                    engagement_id=engagement_raw.engagement_id,
-                    system_id=engagement_raw.star_system_id,
-                    start_time=engagement_raw.start_date,
-                    end_time=engagement_raw.end_date,
-                    outcome=engagement_raw.outcome_type,
-                    final_score=final_score,
-                    engagement_type=engagement_type
-                )
-                db_engagement = engagement_data.to_db_model()
-
-                # Save to database (upsert handles both new and updates)
-                try:
-                    await self.bot.database_manager.add_engagement(db_engagement)
-                except Exception as e:
-                    self.bot.logger.error(f"Error upserting engagement {engagement_data.engagement_id}: {e}")
-
-                # Add to return list if active
-                if not is_active:
-                    continue
-
-                self.bot.logger.info(f"Active engagement found: ID {engagement_id} in system ID {engagement_raw.star_system_id}")
-                new_active_engagements.append(engagement_data)
-
-                # Update in-memory cache (write-through) via lock-safe method
-                await self.bot.cache_manager.update_active_engagement(engagement_id, engagement_data)
-
-                # Immediately mark the galaxy system as under attack so the state is
-                # accurate before the next galaxy_state_refresh cycle runs
-                try:
-                    galaxy_system = await self.bot.database_manager.mark_system_under_attack(engagement_data)
-                    if not galaxy_system:
-                        raise Exception
-                    await self.bot.cache_manager.update_galaxy_system_cache(
-                        engagement_raw.star_system_id, galaxy_system
-                    )
-                except Exception as e:
-                    self.bot.logger.warning(
-                        f"Could not mark system {engagement_raw.star_system_id} as under_attack: {e}"
-                    )
-
-                # Reset consecutive failures on success
-                consecutive_failures = 0
-                engagement_id += 1
-
-            except PssApiError as e:
-                consecutive_failures += 1
-
-                if consecutive_failures >= max_consecutive_failures:
-                    self.bot.logger.info(
-                        f"Engagement scan complete. "
-                        f"Last checked: {engagement_id - 1}. "
-                        f"Found {len(new_active_engagements)} new active engagement(s)."
-                    )
-                    break
-
-                engagement_id += 1
-                await asyncio.sleep(0.5)
-
-            except Exception as e:
-                self.bot.logger.critical(f"Unexpected exception while fetching engagement {engagement_id}: {e}", exc_info=e)
-                raise
-
-        return new_active_engagements
-
+        return formatted_systems_data
 
     async def prune_expired_engagements(self) -> int:
-        expired_engagements: Dict[int, Engagement] = await self.bot.database_manager.get_expired_engagments()
+        expired_engagements: Dict[int, EngagementDB] = await self.bot.database_manager.get_expired_engagments()
         current_time = datetime.now(timezone.utc)
         pruned_count = 0
-
-
-        #for engagement_id, engagement_data in expired_engagments.items():
-        #active_engagements = await crud.get_all_active_engagements(session)
 
         for engagement_id, engagement_data in expired_engagements.items():
             # Ensure DB value is timezone-aware before comparing because i goofed earlier
@@ -270,7 +159,7 @@ class FleetWarsManager:
             self.bot.logger.info(f"Pruning expired engagement ID {engagement_id} (ended at {end_time})")
 
             # Use lock-safe removal
-            await self.bot.cache_manager.remove_engagement_from_cache(engagement_id)
+            await self.remove_engagement_from_cache(engagement_id)
 
             # Clear under_attack on the galaxy system so state is consistent
             # before the next galaxy_state_refresh cycle runs
@@ -279,7 +168,7 @@ class FleetWarsManager:
                 if not updated_system:
                     raise Exception(f"Updated_system was found to be null when trying to clear under_attack for system {engagement_data.system_id}")
 
-                await self.bot.cache_manager.update_galaxy_system_cache(
+                await self.update_galaxy_system_cache(
                     engagement_data.system_id, updated_system
                 )
 
@@ -301,113 +190,7 @@ class FleetWarsManager:
         return pruned_count
 
     async def create_engagement_embed_option(self, engagements: Dict[int, EngagementSystemData] | List[EngagementSystemData]) -> discord.Embed:
-        # Accept dict or list
-        if isinstance(engagements, dict):
-            engagements = list(engagements.values())
-
-        # Empty case
-        if not engagements:
-            embed = discord.Embed(
-                title="⚔️ Active Engagements",
-                description="**No active engagements at this time.**",
-                color=0x808080
-            )
-            return embed
-
-        # Validate type
-        if not isinstance(engagements[0], EngagementSystemData):
-            raise TypeError(f"Expected EngagementSystemData objects, got {type(engagements[0])}")
-
-        # Normalize times and filter out entries without end_time
-        now = datetime.now(timezone.utc)
-        processed: List[tuple[EngagementSystemData, datetime, datetime]] = []
-
-        for eng in engagements:
-            start = DBH.ensure_aware(eng.start_time)
-            end = DBH.ensure_aware(eng.end_time)
-            if not end:
-                continue
-            processed.append((eng, start, end))
-
-        if not processed:
-            embed = discord.Embed(
-                title="⚔️ Active Engagements",
-                description="**No active engagements at this time.**",
-                color=0x808080
-            )
-            return embed
-
-        # Sort by end_time (earliest ending first)
-        sorted_engagements = sorted(processed, key=lambda t: t[2])
-
-        # Determine minimum time remaining (hours)
-        now = datetime.now(timezone.utc)
-        min_time_remaining = min((t[2] - now).total_seconds() / 3600 for t in sorted_engagements)
-
-        # Choose color / status based on min remaining
-        if min_time_remaining < 1:
-            color = 0xFF0000
-            color_status = "🔴"
-        elif min_time_remaining < 2:
-            color = 0xFF8C00
-            color_status = "🟠"
-        elif min_time_remaining < 6:
-            color = 0xFFFF00
-            color_status = "🟡"
-        else:
-            color = 0x00FF00
-            color_status = "🟢"
-
-        embed = discord.Embed(
-            title="⚔️ Active Engagements",
-            description=f"**{len(sorted_engagements)} ongoing battles**",
-            color=color
-        )
-
-        # Build lines using the timezone-aware end_time and current now
-        lines: List[str] = []
-        for eng, start, end in sorted_engagements:
-            system_name = STAR_SYSTEMS.get(eng.system_id, f"System #{eng.system_id}")
-            timestamp = int(end.timestamp())
-
-            time_remaining_hours = (end - now).total_seconds() / 3600
-            if time_remaining_hours < 1:
-                status_emoji = "🔴"
-            elif time_remaining_hours < 6:
-                status_emoji = "🟠"
-            elif time_remaining_hours < 12:
-                status_emoji = "🟡"
-            else:
-                status_emoji = "🟢"
-
-
-            et = (eng.engagement_type or "Unknown").lower()
-            if "raid" in et or "raiding" in et:
-                action_word = "raiding"
-                status_emoji = "🟣"
-            elif "invasion" in et or "invasions" in et:
-                action_word = "invading"
-            else:
-                action_word = "attacking"
-
-            line = f"{status_emoji} [{eng.engagement_id}] **{eng.attacker}** {action_word} **{eng.defender}** | {system_name} | ends <t:{timestamp}:R>"
-            lines.append(line)
-
-        full_text = "\n".join(lines)
-
-        # Respect Discord embed description limits
-        if len(full_text) <= 4096:
-            embed.description = f"**{len(sorted_engagements)} ongoing battles** • {color_status}\n\n" + full_text
-        else:
-            embed.description = f"**{len(sorted_engagements)} ongoing battles** • {color_status}"
-            chunk_size = 10
-            for i in range(0, len(lines), chunk_size):
-                chunk = lines[i:i + chunk_size]
-                field_name = f"Battles {i + 1}-{min(i + chunk_size, len(lines))}"
-                embed.add_field(name=field_name, value="\n".join(chunk), inline=False)
-
-        embed.set_footer(text="🟣 raid | 🟢 >12h | 🟡 <12h | 🟠 <6h | 🔴 <1h • Sorted by time remaining")
-        return embed
+        return await FWH.generate_engagements_status_embed(engagements)
 
     async def create_engagement_detail_embed(self,
                                              engagement_id: int) -> tuple[discord.Embed, Optional[discord.ui.View]]:
@@ -424,10 +207,9 @@ class FleetWarsManager:
                 ),
                 color=0xFF0000
             ), None
-
         # Fetch fresh engagement data from API
         try:
-            await self.bot.api_manager.ensure_valid_token_age() # is this needed?
+            #await self.bot.api_manager.ensure_valid_token_age() # is this needed?
             engagement_raw: EngagementRaw = await self.bot.api_manager.get_engagement(engagement_id)
         except Exception as e:
             self.bot.logger.error(e)
@@ -437,162 +219,7 @@ class FleetWarsManager:
                 color=0xFF0000
             ), None
 
-
-        now = datetime.now(timezone.utc)
-        end_time = DBH.ensure_aware(engagement_raw.end_date)
-        is_active = end_time > now if end_time else False
-
-        # Engagement type + emoji
-        etype = (engagement_raw.engagement_type or "").lower()
-        if "invasion" in etype:
-            emoji = "🚀"
-            title = "Invasion Engagement"
-        elif "raid" in etype:
-            emoji = "⚔️"
-            title = "Raid Engagement"
-        else:
-            emoji = "⚔️"
-            title = "Fleet Engagement"
-
-        # Score + outcome
-
-        #if engagement_raw.outcome_type == "Playing":
-        _raw_attack_users = engagement_raw.attacking_engagement_group._engagement_group_users
-        _seen_attack_users = set()
-        _attack_users = [
-            u for u in _raw_attack_users
-            if u.user.id not in _seen_attack_users and not _seen_attack_users.add(u.user.id)
-        ]
-        number_attackers = len(_attack_users)
-
-        _raw_defend_users = engagement_raw.defending_engagement_group._engagement_group_users
-        _defend_users = list(_raw_defend_users)
-        number_defenders = len({u.user.id for u in _raw_defend_users if u.user.id > 10000})
-
-        attacker_score = sum(((u.max_lives - u.lives_used) * u.power_score) + u.score for u in _attack_users)
-        defender_score = sum(((u.max_lives - u.lives_used) * u.power_score) + u.score for u in _defend_users)
-
-        final_score = (
-            f"{engagement_raw.attacking_engagement_group_name} "
-            f"**{attacker_score}** - "
-            f"**{defender_score}** "
-            f"{engagement_raw.defending_engagement_group_name}"
-        )
-        '''else:
-            final_score = (
-                f"{engagement_raw.attacking_engagement_group_name} "
-                f"{engagement_raw.attacking_points} - "
-                f"{engagement_raw.defending_points} "
-                f"{engagement_raw.defending_engagement_group_name}"
-            )'''
-
-        # System name
-        system_name = STAR_SYSTEMS.get(
-            engagement_raw.star_system_id,
-            f"System #{engagement_raw.star_system_id}"
-        )
-
-        # Embed color
-        color = 0x00FF00 if is_active else 0xFF0000
-
-        embed = discord.Embed(
-            title=f"{emoji} {title}",
-            description=(
-                f"**{engagement_raw.attacking_engagement_group_name}** "
-                f"vs "
-                f"**{engagement_raw.defending_engagement_group_name}** [{engagement_raw.engagement_id}]"
-            ),
-            color=color
-        )
-
-        embed.add_field(
-            name="🪐 System",
-            value=system_name,
-            inline=True
-        )
-
-        if engagement_raw.outcome_type == "Playing":
-            embed.add_field(
-                name="📊 Current Score",
-                value=final_score,
-                inline=True
-            )
-        else:
-            embed.add_field(
-                name="📊 Final Score",
-                value=final_score,
-                inline=True
-            )
-
-        embed.add_field(
-            name="🏁 Outcome",
-            value=engagement_raw.outcome_type or "Unknown",
-            inline=True
-        )
-
-        if end_time:
-            embed.add_field(
-                name="⏳ Ends",
-                value=f"<t:{int(end_time.timestamp())}:R>",
-                inline=False
-            )
-
-            if "invasion" in etype:
-                cutoff_time = engagement_raw.start_date + timedelta(hours=12)
-            elif "raid" in etype:
-                cutoff_time = engagement_raw.start_date + timedelta(hours=3)
-            else:
-                cutoff_time = engagement_raw.start_date + timedelta(hours=12)
-
-            embed.add_field(
-                name="🗓️ Cutoff to Join",
-                value=f"<t:{int(cutoff_time.timestamp())}:F>",
-                inline=True
-            )
-
-            # Remaining attacks
-            atk_attacks_left = sum((u.max_attacks - u.attacks_used) for u in _attack_users)
-            _defend_users_no_npcs = [u for u in _defend_users if u.user.id >= 10000]
-            dfn_attacks_left = sum((u.max_attacks - u.attacks_used) for u in _defend_users_no_npcs)
-            atk_lives_left = sum((u.max_lives - u.lives_used) for u in _attack_users)
-            dfn_lives_left = sum((u.max_lives - u.lives_used) for u in _defend_users_no_npcs)
-
-            embed.add_field(
-                name="⚔️ Remaining Attacks",
-                value=(
-                    f"**{engagement_raw.attacking_engagement_group_name}:** {atk_attacks_left} attacks left\n"
-                    f"**{engagement_raw.defending_engagement_group_name}:** {dfn_attacks_left} attacks left"
-                ),
-                inline=False
-            )
-
-            embed.add_field(
-                name="❤️ Remaining Lives",
-                value=(
-                    f"**{engagement_raw.attacking_engagement_group_name}:** {atk_lives_left} lives left\n"
-                    f"**{engagement_raw.defending_engagement_group_name}:** {dfn_lives_left} lives left"
-                ),
-                inline=True
-            )
-
-            embed.add_field(
-                name="👥 Participants",
-                value=(
-                    f"**{engagement_raw.attacking_engagement_group_name}:** {number_attackers} participants\n"
-                    f"**{engagement_raw.defending_engagement_group_name}:** {number_defenders} participants"
-                ),
-                inline=True
-            )
-
-        embed.set_footer(
-            text=f"Engagement ID: {engagement_id} • {'ACTIVE' if is_active else 'FINISHED'}"
-        )
-
-        # Create the view with participant buttons
-        view = EngagementParticipantsView(engagement_raw, engagement_id)
-
-        return embed, view
-
+        return await FWH.create_engagement_detail_embed(engagement_id, engagement_raw)
 
     async def refresh_galaxy_state(self, force_refresh_all: bool = False) -> int:
         now = datetime.now(timezone.utc)
@@ -600,7 +227,7 @@ class FleetWarsManager:
 
         self.bot.logger.info(f"Starting galaxy state refresh (force_all={force_refresh_all})...")
 
-        engagement_snapshot = await self.bot.cache_manager.get_active_engagements_snapshot()
+        engagement_snapshot = await self.get_active_engagements()
         active_engagement_system_ids: Set[int] = {eng.system_id for eng in engagement_snapshot.values()}
         active_engagement_by_system: Dict[int, int] = {eng.system_id: eng.engagement_id for eng in engagement_snapshot.values()}
 
@@ -612,36 +239,9 @@ class FleetWarsManager:
             self.bot.logger.error(f"Galaxy State Refresh: Token validation failed before refresh: {e}", exc_info=e)
             return 0
 
-        existing_systems: Dict[int, GalaxySystem] = await self.bot.database_manager.get_all_galaxy_systems()
+        existing_systems: Dict[int, GalaxySystemDB] = await self.bot.database_manager.get_all_galaxy_systems()
 
         systems_to_refresh = FWH.get_systems_to_refresh(existing_systems, active_engagement_system_ids, now, force_refresh_all)
-        # # Determine which systems to refresh
-        # if force_refresh_all:
-        #     # Refresh all known systems
-        #     systems_to_refresh = list(STAR_SYSTEMS.keys())
-        # else:
-        #     # Get active engagement system IDs from in-memory cache
-
-        #     for system_id in STAR_SYSTEMS.keys():
-        #         if system_id in existing_systems:
-        #             system = existing_systems[system_id]
-
-        #             # Always refresh systems with an active engagement so we
-        #             # pick up EngagementCooldownEndDate the cycle after it ends
-        #             if system_id in active_engagement_system_ids:
-        #                 systems_to_refresh.append(system_id)
-        #                 continue
-
-        #             if system.cooldown_end is None:
-        #                 systems_to_refresh.append(system_id)
-        #             else:
-        #                 cooldown_aware = system.cooldown_end.replace(
-        #                     tzinfo=timezone.utc) if system.cooldown_end.tzinfo is None else system.cooldown_end
-        #                 time_until_cooldown = (cooldown_aware - now).total_seconds() / 60
-        #                 if time_until_cooldown < 30:
-        #                     systems_to_refresh.append(system_id)
-        #         else:
-        #             systems_to_refresh.append(system_id)
 
         self.bot.logger.info(f"Refreshing {len(systems_to_refresh)} systems...")
 
@@ -694,7 +294,7 @@ class FleetWarsManager:
                     else:
                         # Create new system
                         system_name = STAR_SYSTEMS.get(system_id, f"System {system_id}")
-                        new_system = models.GalaxySystem(
+                        new_system = models.GalaxySystemDB(
                             system_id=system_id,
                             system_name=system_name,
                             owner_name=owner_name,
@@ -720,7 +320,7 @@ class FleetWarsManager:
             # Commit all changes
 
         # Update cache
-        await self.bot.cache_manager.load_galaxy_systems_from_db()
+        await self.load_galaxy_systems_from_db()
 
         self.bot.logger.info(f"Galaxy state refresh completed. Updated {refreshed_count} systems.")
         return refreshed_count

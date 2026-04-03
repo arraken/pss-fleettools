@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands, tasks
 
 from data.constants.galaxy import STAR_SYSTEMS
-from handlers import fleetwarshandler
+#from handlers import fleetwarshandlers
 from classes.databaseclasses import EngagementSystemData
 
 if TYPE_CHECKING:
@@ -96,8 +96,9 @@ class TimerMonitor(commands.Cog):
     async def _engagements_pulse_inner(self):
         self.bot.logger.info(f"Starting engagements pulse at {datetime.now(timezone.utc).isoformat()}")
         await self.bot.fleetwars_manager.prune_expired_engagements()
-        new_engagements = await self.bot.fleetwars_manager.get_active_engagements()
-        await self.check_and_alert_new_engagements(new_engagements)
+        active_engagements = await self.bot.fleetwars_manager.get_active_engagements()
+        active_engagements = [engagement for _, engagement in active_engagements.items()]
+        await self.check_and_alert_new_engagements(active_engagements)
         await self.sync_active_engagements_from_db()
 
     async def _galaxy_state_refresh_inner(self):
@@ -120,23 +121,23 @@ class TimerMonitor(commands.Cog):
                     self.bot.logger.info(f"Skipping engagement {engagement_id} during sync: {e}")
 
             # Preferred API on CacheManager
-            if hasattr(self.bot.cache_manager, "replace_active_engagements"):
-                await self.bot.cache_manager.replace_active_engagements(new_map)
-            else:
-                # Fallback: ensure an asyncio.Lock is present
-                lock = getattr(self.bot.cache_manager, "_active_engagements_lock", None)
-                if lock is None:
-                    self.bot.cache_manager._active_engagements_lock = asyncio.Lock()
-                    lock = self.bot.cache_manager._active_engagements_lock
+            # if hasattr(self.bot.cache_manager, "replace_active_engagements"):
+            await self.bot.fleetwars_manager.replace_active_engagements(new_map)
+            # else:
+                # # Fallback: ensure an asyncio.Lock is present
+                # lock = getattr(self.bot.cache_manager, "_active_engagements_lock", None)
+                # if lock is None:
+                #     self.bot.cache_manager._active_engagements_lock = asyncio.Lock()
+                #     lock = self.bot.cache_manager._active_engagements_lock
 
-                async with lock:
-                    priv = getattr(self.bot.cache_manager, "_CacheManager__active_engagements", None)
-                    if priv is None:
-                        self.bot.cache_manager._CacheManager__active_engagements = {}
-                        priv = self.bot.cache_manager._CacheManager__active_engagements
-                    priv.clear()
-                    priv.update(new_map)
-                    self.bot.cache_manager._CacheManager__active_engagements = priv
+                # async with lock:
+                #     priv = getattr(self.bot.cache_manager, "_CacheManager__active_engagements", None)
+                #     if priv is None:
+                #         self.bot.cache_manager._CacheManager__active_engagements = {}
+                #         priv = self.bot.cache_manager._CacheManager__active_engagements
+                #     priv.clear()
+                #     priv.update(new_map)
+                #     self.bot.cache_manager._CacheManager__active_engagements = priv
 
             return len(new_map)
 

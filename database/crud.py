@@ -19,16 +19,16 @@ def _get_session():
 # Fleet wars commands
 # ============================================================================
 
-async def upsert_engagement(session: AsyncSession, db_engagement: models.Engagement) -> bool:
+async def upsert_engagement(session: AsyncSession, db_engagement: models.EngagementDB) -> bool:
     try:
         await session.merge(db_engagement)
         return True
     except Exception:
         return False
 
-async def get_all_active_engagements(session: AsyncSession) -> Dict[int, models.Engagement]:
+async def get_all_active_engagements(session: AsyncSession) -> Dict[int, models.EngagementDB]:
     try:
-        stmt = select(models.Engagement).where(models.Engagement.active == True)
+        stmt = select(models.EngagementDB).where(models.EngagementDB.active == True)
         result = await session.exec(stmt)
         rows = result.all()
         return {eng.engagement_id: eng for eng in rows}
@@ -37,7 +37,7 @@ async def get_all_active_engagements(session: AsyncSession) -> Dict[int, models.
 
 async def get_max_engagement_id(session: AsyncSession) -> int:
     try:
-        stmt = select(models.Engagement.engagement_id).order_by(col(models.Engagement.engagement_id).desc()).limit(1)
+        stmt = select(models.EngagementDB.engagement_id).order_by(col(models.EngagementDB.engagement_id).desc()).limit(1)
         result = await session.exec(stmt)
         row = result.first()
         return int(row) if row is not None else 0
@@ -45,9 +45,9 @@ async def get_max_engagement_id(session: AsyncSession) -> int:
         return 0
 
 async def mark_engagement_inactive(session: AsyncSession, engagement_id: int) -> bool:
-    stmt = select(models.Engagement).where(models.Engagement.engagement_id == engagement_id)
+    stmt = select(models.EngagementDB).where(models.EngagementDB.engagement_id == engagement_id)
     result = await session.exec(stmt)
-    engagement: Optional[models.Engagement] = result.first()
+    engagement: Optional[models.EngagementDB] = result.first()
 
     if not engagement:
         return False
@@ -59,39 +59,39 @@ async def mark_engagement_inactive(session: AsyncSession, engagement_id: int) ->
 
 
 
-async def get_engagements_by_system(session: AsyncSession, system_id: int, active_only: bool) -> Sequence[models.Engagement]:
+async def get_engagements_by_system(session: AsyncSession, system_id: int, active_only: bool) -> Sequence[models.EngagementDB]:
     try:
-        stmt = select(models.Engagement).where(models.Engagement.system_id == system_id)
+        stmt = select(models.EngagementDB).where(models.EngagementDB.system_id == system_id)
         if active_only:
-            stmt = stmt.where(models.Engagement.active == True)
-        stmt = stmt.order_by(col(models.Engagement.start_time).desc())
+            stmt = stmt.where(models.EngagementDB.active == True)
+        stmt = stmt.order_by(col(models.EngagementDB.start_time).desc())
         result = await session.exec(stmt)
         return result.all()
     except Exception:
         return []
 
-async def get_engagements_by_fleet(session: AsyncSession, fleet_name: str, active_only: bool) -> Sequence[models.Engagement]:
+async def get_engagements_by_fleet(session: AsyncSession, fleet_name: str, active_only: bool) -> Sequence[models.EngagementDB]:
     try:
-        stmt = select(models.Engagement).where(
+        stmt = select(models.EngagementDB).where(
             or_(
-                models.Engagement.attacker == fleet_name,
-                models.Engagement.defender == fleet_name
+                models.EngagementDB.attacker == fleet_name,
+                models.EngagementDB.defender == fleet_name
             )
         )
         if active_only:
-            stmt = stmt.where(models.Engagement.active == True)
-        stmt = stmt.order_by(col(models.Engagement.start_time).desc())
+            stmt = stmt.where(models.EngagementDB.active == True)
+        stmt = stmt.order_by(col(models.EngagementDB.start_time).desc())
         result = await session.exec(stmt)
         return result.all()
     except Exception:
         return []
     
-async def get_expired_engagements(session: AsyncSession) -> Dict[int, models.Engagement]:
+async def get_expired_engagements(session: AsyncSession) -> Dict[int, models.EngagementDB]:
     current_time = DBH.ensure_aware(datetime.now(timezone.utc)).replace(tzinfo=None)
     stmt = (
-        select(models.Engagement)
-        .where(models.Engagement.active == True)
-        .where(col(models.Engagement.end_time) < current_time)
+        select(models.EngagementDB)
+        .where(models.EngagementDB.active == True)
+        .where(col(models.EngagementDB.end_time) < current_time)
     )
     result = await session.exec(stmt)
     rows = result.all()
@@ -99,8 +99,8 @@ async def get_expired_engagements(session: AsyncSession) -> Dict[int, models.Eng
 
 async def count_active_engagements(session: AsyncSession) -> int:
     stmt = (
-        select(func.count(col(models.Engagement.engagement_id)))
-        .where(col(models.Engagement.active) == True)
+        select(func.count(col(models.EngagementDB.engagement_id)))
+        .where(col(models.EngagementDB.active) == True)
     )
     result = await session.exec(stmt)
     return result.one()
@@ -109,7 +109,7 @@ async def count_active_engagements(session: AsyncSession) -> int:
 # Galaxy system commands
 # ============================================================================
 
-async def upsert_galaxy_system(session: AsyncSession, galaxy_system: models.GalaxySystem) -> bool:
+async def upsert_galaxy_system(session: AsyncSession, galaxy_system: models.GalaxySystemDB) -> bool:
     try:
         await session.merge(galaxy_system)
         return True
@@ -117,24 +117,24 @@ async def upsert_galaxy_system(session: AsyncSession, galaxy_system: models.Gala
         return False
 
 
-async def get_galaxy_system(session: AsyncSession, system_id: int) -> Optional[models.GalaxySystem]:
-    return await session.get(models.GalaxySystem, system_id)
+async def get_galaxy_system(session: AsyncSession, system_id: int) -> Optional[models.GalaxySystemDB]:
+    return await session.get(models.GalaxySystemDB, system_id)
 
 
-async def get_all_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystem]:
-    result = await session.exec(select(models.GalaxySystem))
+async def get_all_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystemDB]:
+    result = await session.exec(select(models.GalaxySystemDB))
     systems = result.all()
     return {system.system_id: system for system in systems}
 
 
-async def get_targeted_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystem]:
-    result = await session.exec(select(models.GalaxySystem).where(models.GalaxySystem.is_targeted == True))
+async def get_targeted_galaxy_systems(session: AsyncSession) -> Dict[int, models.GalaxySystemDB]:
+    result = await session.exec(select(models.GalaxySystemDB).where(models.GalaxySystemDB.is_targeted == True))
     systems = result.all()
     return {system.system_id: system for system in systems}
 
 
 async def clear_system_target_by_fleet_id(session: AsyncSession, system_id: int, fleet_id: int) -> bool:
-    system = await session.get(models.GalaxySystem, system_id)
+    system = await session.get(models.GalaxySystemDB, system_id)
     if not system or (system and not system.is_targeted):
         return False
 
@@ -161,7 +161,7 @@ async def clear_system_target_by_fleet_id(session: AsyncSession, system_id: int,
 
     return True
 
-async def mark_system_under_attack(session: AsyncSession, engagement_data: EngagementSystemData) -> models.GalaxySystem | None:
+async def mark_system_under_attack(session: AsyncSession, engagement_data: EngagementSystemData) -> models.GalaxySystemDB | None:
     now = datetime.now(timezone.utc)
     galaxy_system = await get_galaxy_system(session, engagement_data.system_id)
     if not galaxy_system:
@@ -176,7 +176,7 @@ async def mark_system_under_attack(session: AsyncSession, engagement_data: Engag
 
     return galaxy_system
 
-async def deactivate_under_attack_system(session: AsyncSession, system_id: int) -> models.GalaxySystem | None:
+async def deactivate_under_attack_system(session: AsyncSession, system_id: int) -> models.GalaxySystemDB | None:
     now = datetime.now(timezone.utc)
     galaxy_system = await get_galaxy_system(session, system_id)
     if not galaxy_system:

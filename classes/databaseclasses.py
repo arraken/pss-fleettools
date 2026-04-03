@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from database.models import Engagement, GalaxySystem
+from database.models import EngagementDB, GalaxySystemDB
 from handlers import databasehandlers as DBH
 
 
@@ -19,10 +19,10 @@ class EngagementSystemData:
     final_score: str
     engagement_type: str
 
-    def to_db_model(self) -> Engagement:
+    def to_db_model(self) -> EngagementDB:
         start = DBH.ensure_aware(self.start_time)
         end = DBH.ensure_aware(self.end_time)
-        return Engagement(
+        return EngagementDB(
             engagement_id=self.engagement_id,
             system_id=self.system_id,
             attacker=self.attacker,
@@ -37,7 +37,7 @@ class EngagementSystemData:
         )
 
     @classmethod
-    def from_db_model(cls, db_engagement: Engagement) -> "EngagementSystemData":
+    def from_db_model(cls, db_engagement: EngagementDB) -> "EngagementSystemData":
         start = DBH.ensure_aware(db_engagement.start_time)
         end = DBH.ensure_aware(db_engagement.end_time)
         return cls(
