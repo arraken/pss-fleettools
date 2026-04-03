@@ -185,6 +185,8 @@ class FleetWarsManager:
 
                 # Add to return list if active
                 if not is_active:
+                    consecutive_failures = 0
+                    engagement_id += 1
                     continue
 
                 self.bot.logger.info(

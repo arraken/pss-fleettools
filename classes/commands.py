@@ -18,7 +18,7 @@ class Commands(commands.Cog):
     async def engagements(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         try:
-            active = await self.bot.fleetwars_manager.get_active_engagements_pulse()
+            active = await self.bot.fleetwars_manager.get_active_engagements()
             embed = await self.bot.fleetwars_manager.create_engagement_embed_option(active)
             await interaction.followup.send(embed=embed)
         except Exception as e:
