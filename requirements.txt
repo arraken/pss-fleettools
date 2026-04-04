@@ -6,3 +6,4 @@ sqlalchemy[asyncio]>=2.0.0
 aiosqlite
 icecream
 fuzzywuzzy
+python-levenshtein
