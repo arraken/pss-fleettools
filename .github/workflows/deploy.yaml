@@ -19,7 +19,7 @@ jobs:
           $body = [ordered]@{
             embeds = @(
               [ordered]@{
-                title  = "Deployment Starting - PSS Fleet Tools"
+                title  = "Deployment Starting - PSS FleetTools"
                 color  = 16776960
                 fields = @(
                   [ordered]@{ name = "Commit";    value = $commit; inline = $true }
@@ -63,7 +63,7 @@ jobs:
             & $venvPython -c "import sqlite3; conn = sqlite3.connect('$dbFwd'); conn.execute('PRAGMA wal_checkpoint(TRUNCATE)'); conn.close()"
             Write-Host "WAL checkpoint complete."
           }
-          $workspaceData = "C:\Users\Kamguh\actions-runners\pss-fleettools\_work\pss-fleettools\pss-fleettools\data"
+          $workspaceData = "C:\Users\Kamguh\Actions-Runners\pss-fleettools\_work\pss-fleettools\pss-fleettools\data"
           if (Test-Path $workspaceData) {
             Get-ChildItem -Path $workspaceData -Filter "fleetwars.db*" | ForEach-Object {
               for ($i = 0; $i -lt 10; $i++) {
@@ -79,8 +79,8 @@ jobs:
           $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
           if (-not $webhookUrl) { exit 0 }
           $outcome = "${{ steps.stop_bot.outcome }}"
-          $title = if ($outcome -eq "success") { "Step 1/4: Bot Stopped" } else { "Step 1/4: Stop Bot Failed" }
-          $color = if ($outcome -eq "success") { 3066993 } else { 15158332 }
+          $title  = if ($outcome -eq "success") { "Step 1/4: Bot Stopped" } else { "Step 1/4: Stop Bot Failed" }
+          $color  = if ($outcome -eq "success") { 3066993 } else { 15158332 }
           $status = if ($outcome -eq "success") { "Bot stopped and database checkpointed." } else { "Failed. Outcome: $outcome" }
           $body = [ordered]@{
             embeds = @([ordered]@{
@@ -108,14 +108,15 @@ jobs:
           $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
           if (-not $webhookUrl) { exit 0 }
           $outcome = "${{ steps.checkout.outcome }}"
-          $title = if ($outcome -eq "success") { "Step 2/4: Code Checked Out" } else { "Step 2/4: Checkout Failed" }
-          $color = if ($outcome -eq "success") { 3066993 } else { 15158332 }
+          $title  = if ($outcome -eq "success") { "Step 2/4: Code Checked Out" } else { "Step 2/4: Checkout Failed" }
+          $color  = if ($outcome -eq "success") { 3066993 } else { 15158332 }
+          $status = if ($outcome -eq "success") { "Latest production code pulled." } else { "Failed. Outcome: $outcome" }
           $body = [ordered]@{
             embeds = @([ordered]@{
               title = $title; color = $color
               fields = @(
                 [ordered]@{ name = "Commit"; value = "${{ github.sha }}".Substring(0,7); inline = $true }
-                [ordered]@{ name = "Status"; value = if ($outcome -eq "success") { "Latest production code pulled." } else { "Failed. Outcome: $outcome" } }
+                [ordered]@{ name = "Status"; value = $status }
               )
               footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
             })
@@ -166,21 +167,21 @@ jobs:
       - name: Start bot
         id: start_bot
         run: |
-          $botDir     = "${{ github.workspace }}"
-          $batchPath  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\start_bot.bat"
-          $venvPython = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
-          $mainPath   = Join-Path $botDir "fleetwars-main.py"
-          $canonicalDb = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\data\pss-fleettools.db"
+          $botDir      = "${{ github.workspace }}"
+          $batchPath   = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\start_bot.bat"
+          $venvPython  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
+          $mainPath    = Join-Path $botDir "fleetwars-main.py"
+          $canonicalDb = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\data\fleetwars.db"
           $lines = "@echo off", "cd /d `"$botDir`"", "set FLEETTOOLS_DB_PATH=$canonicalDb", "`"$venvPython`" `"$mainPath`" -l"
           $lines | Set-Content -Path $batchPath
-          Unregister-ScheduledTask -TaskName "StartVerificationBot" -Confirm:$false -ErrorAction SilentlyContinue
+          Unregister-ScheduledTask -TaskName "StartFleetTools" -Confirm:$false -ErrorAction SilentlyContinue
           $action   = New-ScheduledTaskAction -Execute $batchPath
           $trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
           $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)
-          Register-ScheduledTask -TaskName "StartFleetToolsBot" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
-          Start-ScheduledTask -TaskName "StartFleetToolsBot"
+          Register-ScheduledTask -TaskName "StartFleetTools" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
+          Start-ScheduledTask -TaskName "StartFleetTools"
           Start-Sleep -Seconds 8
-          Unregister-ScheduledTask -TaskName "StartFleetToolsBot" -Confirm:$false -ErrorAction SilentlyContinue
+          Unregister-ScheduledTask -TaskName "StartFleetTools" -Confirm:$false -ErrorAction SilentlyContinue
           $check = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*fleetwars-main.py*" }
           if (-not $check) { Write-Error "Bot did not start!"; exit 1 }
           Write-Host "Bot started (PID $($check.ProcessId))."
@@ -192,12 +193,12 @@ jobs:
           if (-not $webhookUrl) { exit 0 }
           $body = [ordered]@{
             embeds = @([ordered]@{
-              title = "Step 4/4: PSS Fleet Tools Started - Deployment Complete ✅"
+              title = "Step 4/4: Bot Started - Deployment Complete"
               color = 3066993
               fields = @(
                 [ordered]@{ name = "Commit";    value = "${{ github.sha }}".Substring(0,7); inline = $true }
                 [ordered]@{ name = "Pushed by"; value = "${{ github.actor }}"; inline = $true }
-                [ordered]@{ name = "Status";    value = "PSS Fleet Tools restarted with latest production code." }
+                [ordered]@{ name = "Status";    value = "PSS FleetTools restarted with latest production code." }
               )
               footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
             })
@@ -212,16 +213,16 @@ jobs:
           if (-not $webhookUrl) { exit 0 }
           $body = [ordered]@{
             embeds = @([ordered]@{
-              title = "Production Deployment Failed ❌ - PSS Verification Bot"
+              title = "Production Deployment Failed - PSS FleetTools"
               color = 15158332
               fields = @(
-                [ordered]@{ name = "Commit";            value = "${{ github.sha }}".Substring(0,7); inline = $true }
-                [ordered]@{ name = "Pushed by";         value = "${{ github.actor }}"; inline = $true }
-                [ordered]@{ name = "Stop Bot";          value = "${{ steps.stop_bot.outcome }}";     inline = $true }
-                [ordered]@{ name = "Checkout";          value = "${{ steps.checkout.outcome }}";     inline = $true }
-                [ordered]@{ name = "Copy Credentials";  value = "${{ steps.copy_private.outcome }}"; inline = $true }
-                [ordered]@{ name = "Install Deps";      value = "${{ steps.install_deps.outcome }}"; inline = $true }
-                [ordered]@{ name = "Start Bot";         value = "${{ steps.start_bot.outcome }}";    inline = $true }
+                [ordered]@{ name = "Commit";           value = "${{ github.sha }}".Substring(0,7); inline = $true }
+                [ordered]@{ name = "Pushed by";        value = "${{ github.actor }}"; inline = $true }
+                [ordered]@{ name = "Stop Bot";         value = "${{ steps.stop_bot.outcome }}";     inline = $true }
+                [ordered]@{ name = "Checkout";         value = "${{ steps.checkout.outcome }}";     inline = $true }
+                [ordered]@{ name = "Copy Credentials"; value = "${{ steps.copy_private.outcome }}"; inline = $true }
+                [ordered]@{ name = "Install Deps";     value = "${{ steps.install_deps.outcome }}"; inline = $true }
+                [ordered]@{ name = "Start Bot";        value = "${{ steps.start_bot.outcome }}";    inline = $true }
               )
               footer = [ordered]@{ text = "GitHub Actions - Check runner logs for details" }
             })
