@@ -47,13 +47,14 @@ async def get_fleet_wars_status(bot: "FleetToolsBot") -> List[Dict]:
                 systems_data.append({
                     'name': system_name,
                     'owner': "Error",
-                    'cooldown': "Error"
+                    'cooldown': "Error",
+                    'cooldown_seconds': 0,
+                    'under_attack': False
                 })
                 continue
 
             owner_name, cooldown_end = result
             is_under_attack = system_id in active_engagement_system_ids
-            cooldown_end = _ensure_aware(cooldown_end)
 
             # Format cooldown status
             cooldown_secs = 0
