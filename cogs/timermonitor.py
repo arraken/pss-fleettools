@@ -35,21 +35,21 @@ class TimerMonitor(commands.Cog):
         self.galaxy_state_refresh.cancel()
         self.monthly_prestige_rebuild.cancel()
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=1)
     async def engagements_pulse(self):
         try:
-            await asyncio.wait_for(self._engagements_pulse_inner(), timeout=240.0)
+            await asyncio.wait_for(self._engagements_pulse_inner(), timeout=120.0)
         except asyncio.TimeoutError:
-            self.bot.logger.error("Engagements pulse timed out after 4 minutes")
+            self.bot.logger.error("Engagements pulse timed out after 2 minutes")
         except Exception as e:
             self.bot.logger.error(f"Engagements pulse error: {e}", exc_info=True)
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(minutes=5)
     async def galaxy_state_refresh(self):
         try:
-            await asyncio.wait_for(self._galaxy_state_refresh_inner(), timeout=540.0)
+            await asyncio.wait_for(self._galaxy_state_refresh_inner(), timeout=300.0)
         except asyncio.TimeoutError:
-            self.bot.logger.error("galaxy_state_refresh timed out after 9 minutes — skipping this cycle.")
+            self.bot.logger.error("galaxy_state_refresh timed out after 6 minutes — skipping this cycle.")
 
     @engagements_pulse.before_loop
     async def before_engagements_pulse(self):

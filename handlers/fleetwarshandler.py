@@ -148,6 +148,7 @@ async def get_active_engagements(bot: "FleetToolsBot") -> List[EngagementSystemD
 
     while consecutive_failures < max_consecutive_failures:
         try:
+            bot.logger.info(f"Fetching engagement status for engagement {engagement_id}")
             # Get EngagementRaw object from API
             engagement_raw: EngagementRaw = await bot.api_manager.get_engagement(engagement_id)
             await asyncio.sleep(2)
