@@ -21,6 +21,7 @@ class Commands(commands.Cog):
             active = self.bot.cache_manager._CacheManager__active_engagements
             embed = await fleetwarshandler.create_engagement_embed_option(active)
             await interaction.followup.send(embed=embed)
+
         except Exception as e:
             self.bot.logger.error(f"Error in /engagements: {e}", exc_info=e)
             await interaction.followup.send("❌ Error fetching engagements.", ephemeral=True)
