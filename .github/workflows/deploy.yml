@@ -167,7 +167,7 @@ jobs:
 
           # Wait and verify the service started
           sleep 8
-          STATUS=$(systemctl is-active bot-fleettools)
+          STATUS=$(systemctl is-active bot-fleettools || true)
           if [ "$STATUS" != "active" ]; then
             echo "ERROR: Bot service did not start successfully!"
             exit 1
