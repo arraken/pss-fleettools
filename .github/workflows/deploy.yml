@@ -33,7 +33,7 @@ jobs:
           # Poll until the service is fully stopped (up to 30 seconds)
           DEADLINE=$((SECONDS + 30))
           while [ $SECONDS -lt $DEADLINE ]; do
-            STATUS=$(systemctl is-active bot-fleettools)
+            STATUS=$(systemctl is-active bot-fleettools || true)
             if [ "$STATUS" != "active" ]; then
               echo "Service confirmed stopped."
               break
@@ -41,8 +41,7 @@ jobs:
             echo "Waiting for service to stop..."
             sleep 2
           done
-
-          if [ "$(systemctl is-active bot-fleettools)" = "active" ]; then
+          if [ "$(systemctl is-active bot-fleettools || true)" = "active" ]; then
             echo "ERROR: Service did not stop within 30 seconds."
             exit 1
           fi
