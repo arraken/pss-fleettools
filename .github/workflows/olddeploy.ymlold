@@ -1,0 +1,231 @@
+name: Deploy to Production
+on:
+  push:
+    branches:
+      - production
+defaults:
+  run:
+    shell: powershell
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Notify Discord - Deployment Started
+        run: |
+          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if (-not $webhookUrl) { Write-Host "No webhook set, skipping."; exit 0 }
+          $commit = "${{ github.sha }}".Substring(0, 7)
+          $author = "${{ github.actor }}"
+          $body = [ordered]@{
+            embeds = @(
+              [ordered]@{
+                title  = "Deployment Starting - PSS FleetTools"
+                color  = 16776960
+                fields = @(
+                  [ordered]@{ name = "Commit";    value = $commit; inline = $true }
+                  [ordered]@{ name = "Pushed by"; value = $author; inline = $true }
+                  [ordered]@{ name = "Status";    value = "Stopping bot and preparing workspace..." }
+                )
+                footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
+              }
+            )
+          }
+          $json = $body | ConvertTo-Json -Depth 10 -Compress
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+
+      - name: Stop bot before checkout
+        id: stop_bot
+        run: |
+          $procs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+            $_.CommandLine -like "*fleetwars-main.py*"
+          }
+          if ($procs) {
+            foreach ($p in $procs) {
+              Write-Host "Stopping PID $($p.ProcessId)"
+              Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+          } else { Write-Host "No existing bot process found." }
+          $deadline = (Get-Date).AddSeconds(30)
+          $exited = $false
+          while ((Get-Date) -lt $deadline) {
+            $still = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+              $_.CommandLine -like "*fleetwars-main.py*"
+            }
+            if (-not $still) { $exited = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $exited) { Write-Error "Bot did not exit in time."; exit 1 }
+          $canonicalDb  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\data\fleetwars.db"
+          $venvPython   = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
+          if (Test-Path $canonicalDb) {
+            $dbFwd = $canonicalDb.Replace("\", "/")
+            & $venvPython -c "import sqlite3; conn = sqlite3.connect('$dbFwd'); conn.execute('PRAGMA wal_checkpoint(TRUNCATE)'); conn.close()"
+            Write-Host "WAL checkpoint complete."
+          }
+          $workspaceData = "C:\Users\Kamguh\Actions-Runners\pss-fleettools\_work\pss-fleettools\pss-fleettools\data"
+          if (Test-Path $workspaceData) {
+            Get-ChildItem -Path $workspaceData -Filter "fleetwars.db*" | ForEach-Object {
+              for ($i = 0; $i -lt 10; $i++) {
+                try { Remove-Item $_.FullName -Force -ErrorAction Stop; break }
+                catch { Start-Sleep -Seconds 1 }
+              }
+            }
+          }
+
+      - name: Notify Discord - Stop Bot
+        if: always()
+        run: |
+          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if (-not $webhookUrl) { exit 0 }
+          $outcome = "${{ steps.stop_bot.outcome }}"
+          $title  = if ($outcome -eq "success") { "Step 1/4: Bot Stopped" } else { "Step 1/4: Stop Bot Failed" }
+          $color  = if ($outcome -eq "success") { 3066993 } else { 15158332 }
+          $status = if ($outcome -eq "success") { "Bot stopped and database checkpointed." } else { "Failed. Outcome: $outcome" }
+          $body = [ordered]@{
+            embeds = @([ordered]@{
+              title = $title; color = $color
+              fields = @(
+                [ordered]@{ name = "Commit"; value = "${{ github.sha }}".Substring(0,7); inline = $true }
+                [ordered]@{ name = "Status"; value = $status }
+              )
+              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
+            })
+          }
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
+          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+
+      - name: Checkout latest code
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          ref: production
+          clean: false
+
+      - name: Notify Discord - Checkout
+        if: always()
+        run: |
+          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if (-not $webhookUrl) { exit 0 }
+          $outcome = "${{ steps.checkout.outcome }}"
+          $title  = if ($outcome -eq "success") { "Step 2/4: Code Checked Out" } else { "Step 2/4: Checkout Failed" }
+          $color  = if ($outcome -eq "success") { 3066993 } else { 15158332 }
+          $status = if ($outcome -eq "success") { "Latest production code pulled." } else { "Failed. Outcome: $outcome" }
+          $body = [ordered]@{
+            embeds = @([ordered]@{
+              title = $title; color = $color
+              fields = @(
+                [ordered]@{ name = "Commit"; value = "${{ github.sha }}".Substring(0,7); inline = $true }
+                [ordered]@{ name = "Status"; value = $status }
+              )
+              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
+            })
+          }
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
+          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+
+      - name: Copy private credentials
+        id: copy_private
+        run: |
+          $src  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\private"
+          $dest = "${{ github.workspace }}\private"
+          if (-not (Test-Path $src)) { Write-Error "Private folder not found."; exit 1 }
+          Copy-Item -Recurse -Force $src $dest
+          Write-Host "Copied private folder."
+
+      - name: Install dependencies
+        id: install_deps
+        run: |
+          $venvPython = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
+          & $venvPython -m pip install --upgrade pip
+          if (Test-Path "requirements.txt") {
+            & $venvPython -m pip install -r requirements.txt --quiet
+          }
+
+      - name: Notify Discord - Install Dependencies
+        if: always()
+        run: |
+          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if (-not $webhookUrl) { exit 0 }
+          $copyOutcome = "${{ steps.copy_private.outcome }}"
+          $depsOutcome = "${{ steps.install_deps.outcome }}"
+          $ok = $copyOutcome -eq "success" -and $depsOutcome -eq "success"
+          $body = [ordered]@{
+            embeds = @([ordered]@{
+              title = if ($ok) { "Step 3/4: Dependencies Installed" } else { "Step 3/4: Setup Failed" }
+              color = if ($ok) { 3066993 } else { 15158332 }
+              fields = @(
+                [ordered]@{ name = "Commit"; value = "${{ github.sha }}".Substring(0,7); inline = $true }
+                [ordered]@{ name = "Status"; value = if ($ok) { "Credentials copied and packages installed." } else { "Credentials: $copyOutcome | Deps: $depsOutcome" } }
+              )
+              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
+            })
+          }
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
+          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+
+      - name: Start bot
+        id: start_bot
+        run: |
+          $botDir      = "${{ github.workspace }}"
+          $batchPath   = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\start_bot.bat"
+          $venvPython  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
+          $mainPath    = Join-Path $botDir "fleetwars-main.py"
+          $canonicalDb = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\data\fleetwars.db"
+          $lines = "@echo off", "cd /d `"$botDir`"", "set FLEETTOOLS_DB_PATH=$canonicalDb", "`"$venvPython`" `"$mainPath`" -l"
+          $lines | Set-Content -Path $batchPath
+          Unregister-ScheduledTask -TaskName "StartFleetTools" -Confirm:$false -ErrorAction SilentlyContinue
+          $action   = New-ScheduledTaskAction -Execute $batchPath
+          $trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
+          $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)
+          Register-ScheduledTask -TaskName "StartFleetTools" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
+          Start-ScheduledTask -TaskName "StartFleetTools"
+          Start-Sleep -Seconds 8
+          Unregister-ScheduledTask -TaskName "StartFleetTools" -Confirm:$false -ErrorAction SilentlyContinue
+          $check = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*fleetwars-main.py*" }
+          if (-not $check) { Write-Error "Bot did not start!"; exit 1 }
+          Write-Host "Bot started (PID $($check.ProcessId))."
+
+      - name: Notify Discord on success
+        if: steps.start_bot.outcome == 'success'
+        run: |
+          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if (-not $webhookUrl) { exit 0 }
+          $body = [ordered]@{
+            embeds = @([ordered]@{
+              title = "Step 4/4: Bot Started - Deployment Complete"
+              color = 3066993
+              fields = @(
+                [ordered]@{ name = "Commit";    value = "${{ github.sha }}".Substring(0,7); inline = $true }
+                [ordered]@{ name = "Pushed by"; value = "${{ github.actor }}"; inline = $true }
+                [ordered]@{ name = "Status";    value = "PSS FleetTools restarted with latest production code." }
+              )
+              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
+            })
+          }
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
+          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+
+      - name: Notify Discord on failure
+        if: steps.start_bot.outcome == 'failure' || steps.start_bot.outcome == 'skipped'
+        run: |
+          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if (-not $webhookUrl) { exit 0 }
+          $body = [ordered]@{
+            embeds = @([ordered]@{
+              title = "Production Deployment Failed - PSS FleetTools"
+              color = 15158332
+              fields = @(
+                [ordered]@{ name = "Commit";           value = "${{ github.sha }}".Substring(0,7); inline = $true }
+                [ordered]@{ name = "Pushed by";        value = "${{ github.actor }}"; inline = $true }
+                [ordered]@{ name = "Stop Bot";         value = "${{ steps.stop_bot.outcome }}";     inline = $true }
+                [ordered]@{ name = "Checkout";         value = "${{ steps.checkout.outcome }}";     inline = $true }
+                [ordered]@{ name = "Copy Credentials"; value = "${{ steps.copy_private.outcome }}"; inline = $true }
+                [ordered]@{ name = "Install Deps";     value = "${{ steps.install_deps.outcome }}"; inline = $true }
+                [ordered]@{ name = "Start Bot";        value = "${{ steps.start_bot.outcome }}";    inline = $true }
+              )
+              footer = [ordered]@{ text = "GitHub Actions - Check runner logs for details" }
+            })
+          }
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
+          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"

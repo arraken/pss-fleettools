@@ -1,99 +1,86 @@
 name: Deploy to Production
+
 on:
   push:
     branches:
       - production
+
 defaults:
   run:
-    shell: powershell
+    shell: bash
+
 jobs:
   deploy:
     runs-on: self-hosted
+
     steps:
       - name: Notify Discord - Deployment Started
         run: |
-          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          if (-not $webhookUrl) { Write-Host "No webhook set, skipping."; exit 0 }
-          $commit = "${{ github.sha }}".Substring(0, 7)
-          $author = "${{ github.actor }}"
-          $body = [ordered]@{
-            embeds = @(
-              [ordered]@{
-                title  = "Deployment Starting - PSS FleetTools"
-                color  = 16776960
-                fields = @(
-                  [ordered]@{ name = "Commit";    value = $commit; inline = $true }
-                  [ordered]@{ name = "Pushed by"; value = $author; inline = $true }
-                  [ordered]@{ name = "Status";    value = "Stopping bot and preparing workspace..." }
-                )
-                footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
-              }
-            )
-          }
-          $json = $body | ConvertTo-Json -Depth 10 -Compress
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if [ -z "$WEBHOOK_URL" ]; then echo "No webhook set, skipping."; exit 0; fi
+          COMMIT=$(echo "${{ github.sha }}" | cut -c1-7)
+          AUTHOR="${{ github.actor }}"
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"embeds\":[{\"title\":\"Deployment Starting - PSS FleetTools\",\"color\":16776960,\"fields\":[{\"name\":\"Commit\",\"value\":\"$COMMIT\",\"inline\":true},{\"name\":\"Pushed by\",\"value\":\"$AUTHOR\",\"inline\":true},{\"name\":\"Status\",\"value\":\"Stopping bot and preparing workspace...\"}],\"footer\":{\"text\":\"GitHub Actions - Self-hosted Runner\"}}]}"
 
       - name: Stop bot before checkout
         id: stop_bot
         run: |
-          $procs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
-            $_.CommandLine -like "*fleetwars-main.py*"
-          }
-          if ($procs) {
-            foreach ($p in $procs) {
-              Write-Host "Stopping PID $($p.ProcessId)"
-              Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-            }
-          } else { Write-Host "No existing bot process found." }
-          $deadline = (Get-Date).AddSeconds(30)
-          $exited = $false
-          while ((Get-Date) -lt $deadline) {
-            $still = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
-              $_.CommandLine -like "*fleetwars-main.py*"
-            }
-            if (-not $still) { $exited = $true; break }
-            Start-Sleep -Seconds 2
-          }
-          if (-not $exited) { Write-Error "Bot did not exit in time."; exit 1 }
-          $canonicalDb  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\data\fleetwars.db"
-          $venvPython   = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
-          if (Test-Path $canonicalDb) {
-            $dbFwd = $canonicalDb.Replace("\", "/")
-            & $venvPython -c "import sqlite3; conn = sqlite3.connect('$dbFwd'); conn.execute('PRAGMA wal_checkpoint(TRUNCATE)'); conn.close()"
-            Write-Host "WAL checkpoint complete."
-          }
-          $workspaceData = "C:\Users\Kamguh\Actions-Runners\pss-fleettools\_work\pss-fleettools\pss-fleettools\data"
-          if (Test-Path $workspaceData) {
-            Get-ChildItem -Path $workspaceData -Filter "fleetwars.db*" | ForEach-Object {
-              for ($i = 0; $i -lt 10; $i++) {
-                try { Remove-Item $_.FullName -Force -ErrorAction Stop; break }
-                catch { Start-Sleep -Seconds 1 }
-              }
-            }
-          }
+          # Stop the systemd service
+          sudo /usr/bin/systemctl stop bot-fleettools || true
+
+          # Poll until the service is fully stopped (up to 30 seconds)
+          DEADLINE=$((SECONDS + 30))
+          while [ $SECONDS -lt $DEADLINE ]; do
+            STATUS=$(systemctl is-active bot-fleettools)
+            if [ "$STATUS" != "active" ]; then
+              echo "Service confirmed stopped."
+              break
+            fi
+            echo "Waiting for service to stop..."
+            sleep 2
+          done
+
+          if [ "$(systemctl is-active bot-fleettools)" = "active" ]; then
+            echo "ERROR: Service did not stop within 30 seconds."
+            exit 1
+          fi
+
+          # WAL checkpoint the canonical database
+          CANONICAL_DB="/home/botrunner/bots/fleettools/data/fleetwars.db"
+          VENV_PYTHON="/home/botrunner/bots/fleettools/venv/bin/python"
+          if [ -f "$CANONICAL_DB" ]; then
+            "$VENV_PYTHON" -c "import sqlite3; conn = sqlite3.connect('$CANONICAL_DB'); conn.execute('PRAGMA wal_checkpoint(TRUNCATE)'); conn.close()"
+            echo "WAL checkpoint completed on canonical database."
+          fi
+
+          # Remove any stale database files from the runner workspace
+          WORKSPACE_DATA="${{ github.workspace }}/data"
+          if [ -d "$WORKSPACE_DATA" ]; then
+            find "$WORKSPACE_DATA" -name "fleetwars.db*" -exec rm -f {} \;
+            echo "Removed stale database files from workspace."
+          fi
 
       - name: Notify Discord - Stop Bot
         if: always()
         run: |
-          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          if (-not $webhookUrl) { exit 0 }
-          $outcome = "${{ steps.stop_bot.outcome }}"
-          $title  = if ($outcome -eq "success") { "Step 1/4: Bot Stopped" } else { "Step 1/4: Stop Bot Failed" }
-          $color  = if ($outcome -eq "success") { 3066993 } else { 15158332 }
-          $status = if ($outcome -eq "success") { "Bot stopped and database checkpointed." } else { "Failed. Outcome: $outcome" }
-          $body = [ordered]@{
-            embeds = @([ordered]@{
-              title = $title; color = $color
-              fields = @(
-                [ordered]@{ name = "Commit"; value = "${{ github.sha }}".Substring(0,7); inline = $true }
-                [ordered]@{ name = "Status"; value = $status }
-              )
-              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
-            })
-          }
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
-          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
+          OUTCOME="${{ steps.stop_bot.outcome }}"
+          COMMIT=$(echo "${{ github.sha }}" | cut -c1-7)
+          if [ "$OUTCOME" = "success" ]; then
+            TITLE="Step 1/4: Bot Stopped"
+            COLOR=3066993
+            STATUS="Bot service stopped and database checkpointed successfully."
+          else
+            TITLE="Step 1/4: Stop Bot Failed"
+            COLOR=15158332
+            STATUS="Failed to stop bot or checkpoint database. Outcome: $OUTCOME"
+          fi
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"embeds\":[{\"title\":\"$TITLE\",\"color\":$COLOR,\"fields\":[{\"name\":\"Commit\",\"value\":\"$COMMIT\",\"inline\":true},{\"name\":\"Status\",\"value\":\"$STATUS\"}],\"footer\":{\"text\":\"GitHub Actions - Self-hosted Runner\"}}]}"
 
       - name: Checkout latest code
         id: checkout
@@ -105,127 +92,112 @@ jobs:
       - name: Notify Discord - Checkout
         if: always()
         run: |
-          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          if (-not $webhookUrl) { exit 0 }
-          $outcome = "${{ steps.checkout.outcome }}"
-          $title  = if ($outcome -eq "success") { "Step 2/4: Code Checked Out" } else { "Step 2/4: Checkout Failed" }
-          $color  = if ($outcome -eq "success") { 3066993 } else { 15158332 }
-          $status = if ($outcome -eq "success") { "Latest production code pulled." } else { "Failed. Outcome: $outcome" }
-          $body = [ordered]@{
-            embeds = @([ordered]@{
-              title = $title; color = $color
-              fields = @(
-                [ordered]@{ name = "Commit"; value = "${{ github.sha }}".Substring(0,7); inline = $true }
-                [ordered]@{ name = "Status"; value = $status }
-              )
-              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
-            })
-          }
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
-          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
+          OUTCOME="${{ steps.checkout.outcome }}"
+          COMMIT=$(echo "${{ github.sha }}" | cut -c1-7)
+          if [ "$OUTCOME" = "success" ]; then
+            TITLE="Step 2/4: Code Checked Out"
+            COLOR=3066993
+            STATUS="Latest production code pulled from repository."
+          else
+            TITLE="Step 2/4: Checkout Failed"
+            COLOR=15158332
+            STATUS="Failed to checkout latest code. Outcome: $OUTCOME"
+          fi
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"embeds\":[{\"title\":\"$TITLE\",\"color\":$COLOR,\"fields\":[{\"name\":\"Commit\",\"value\":\"$COMMIT\",\"inline\":true},{\"name\":\"Status\",\"value\":\"$STATUS\"}],\"footer\":{\"text\":\"GitHub Actions - Self-hosted Runner\"}}]}"
 
       - name: Copy private credentials
         id: copy_private
         run: |
-          $src  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\private"
-          $dest = "${{ github.workspace }}\private"
-          if (-not (Test-Path $src)) { Write-Error "Private folder not found."; exit 1 }
-          Copy-Item -Recurse -Force $src $dest
-          Write-Host "Copied private folder."
+          PRIVATE_SOURCE="/home/botrunner/bots/fleettools/private"
+          PRIVATE_DEST="${{ github.workspace }}/private"
+
+          if [ ! -d "$PRIVATE_SOURCE" ]; then
+            echo "ERROR: Private folder not found at $PRIVATE_SOURCE"
+            exit 1
+          fi
+
+          cp -r "$PRIVATE_SOURCE" "$PRIVATE_DEST"
+          echo "Copied private folder to workspace."
 
       - name: Install dependencies
         id: install_deps
         run: |
-          $venvPython = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
-          & $venvPython -m pip install --upgrade pip
-          if (Test-Path "requirements.txt") {
-            & $venvPython -m pip install -r requirements.txt --quiet
-          }
+          VENV_PYTHON="/home/botrunner/bots/fleettools/venv/bin/python"
+          "$VENV_PYTHON" -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            "$VENV_PYTHON" -m pip install -r requirements.txt --quiet
+          fi
 
       - name: Notify Discord - Install Dependencies
         if: always()
         run: |
-          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          if (-not $webhookUrl) { exit 0 }
-          $copyOutcome = "${{ steps.copy_private.outcome }}"
-          $depsOutcome = "${{ steps.install_deps.outcome }}"
-          $ok = $copyOutcome -eq "success" -and $depsOutcome -eq "success"
-          $body = [ordered]@{
-            embeds = @([ordered]@{
-              title = if ($ok) { "Step 3/4: Dependencies Installed" } else { "Step 3/4: Setup Failed" }
-              color = if ($ok) { 3066993 } else { 15158332 }
-              fields = @(
-                [ordered]@{ name = "Commit"; value = "${{ github.sha }}".Substring(0,7); inline = $true }
-                [ordered]@{ name = "Status"; value = if ($ok) { "Credentials copied and packages installed." } else { "Credentials: $copyOutcome | Deps: $depsOutcome" } }
-              )
-              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
-            })
-          }
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
-          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
+          COPY_OUTCOME="${{ steps.copy_private.outcome }}"
+          DEPS_OUTCOME="${{ steps.install_deps.outcome }}"
+          COMMIT=$(echo "${{ github.sha }}" | cut -c1-7)
+          if [ "$COPY_OUTCOME" = "success" ] && [ "$DEPS_OUTCOME" = "success" ]; then
+            TITLE="Step 3/4: Dependencies Installed"
+            COLOR=3066993
+            STATUS="Private credentials copied and packages installed successfully."
+          else
+            TITLE="Step 3/4: Setup Failed"
+            COLOR=15158332
+            STATUS="Credentials copy: $COPY_OUTCOME | Dependencies: $DEPS_OUTCOME"
+          fi
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"embeds\":[{\"title\":\"$TITLE\",\"color\":$COLOR,\"fields\":[{\"name\":\"Commit\",\"value\":\"$COMMIT\",\"inline\":true},{\"name\":\"Status\",\"value\":\"$STATUS\"}],\"footer\":{\"text\":\"GitHub Actions - Self-hosted Runner\"}}]}"
 
       - name: Start bot
         id: start_bot
         run: |
-          $botDir      = "${{ github.workspace }}"
-          $batchPath   = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\start_bot.bat"
-          $venvPython  = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\.venv\Scripts\python.exe"
-          $mainPath    = Join-Path $botDir "fleetwars-main.py"
-          $canonicalDb = "C:\Users\Kamguh\PycharmProjects\pss-fleettools\data\fleetwars.db"
-          $lines = "@echo off", "cd /d `"$botDir`"", "set FLEETTOOLS_DB_PATH=$canonicalDb", "`"$venvPython`" `"$mainPath`" -l"
-          $lines | Set-Content -Path $batchPath
-          Unregister-ScheduledTask -TaskName "StartFleetTools" -Confirm:$false -ErrorAction SilentlyContinue
-          $action   = New-ScheduledTaskAction -Execute $batchPath
-          $trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
-          $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)
-          Register-ScheduledTask -TaskName "StartFleetTools" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
-          Start-ScheduledTask -TaskName "StartFleetTools"
-          Start-Sleep -Seconds 8
-          Unregister-ScheduledTask -TaskName "StartFleetTools" -Confirm:$false -ErrorAction SilentlyContinue
-          $check = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*fleetwars-main.py*" }
-          if (-not $check) { Write-Error "Bot did not start!"; exit 1 }
-          Write-Host "Bot started (PID $($check.ProcessId))."
+          # Link the canonical database into the workspace data folder
+          WORKSPACE_DATA="${{ github.workspace }}/data"
+          CANONICAL_DB="/home/botrunner/bots/fleettools/data/fleetwars.db"
+          mkdir -p "$WORKSPACE_DATA"
+          ln -sf "$CANONICAL_DB" "$WORKSPACE_DATA/fleetwars.db"
+          echo "Symlinked canonical database into workspace."
+
+          # Start the systemd service
+          sudo /usr/bin/systemctl start bot-fleettools
+
+          # Wait and verify the service started
+          sleep 8
+          STATUS=$(systemctl is-active bot-fleettools)
+          if [ "$STATUS" != "active" ]; then
+            echo "ERROR: Bot service did not start successfully!"
+            exit 1
+          fi
+          echo "Bot service started successfully."
 
       - name: Notify Discord on success
         if: steps.start_bot.outcome == 'success'
         run: |
-          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          if (-not $webhookUrl) { exit 0 }
-          $body = [ordered]@{
-            embeds = @([ordered]@{
-              title = "Step 4/4: Bot Started - Deployment Complete"
-              color = 3066993
-              fields = @(
-                [ordered]@{ name = "Commit";    value = "${{ github.sha }}".Substring(0,7); inline = $true }
-                [ordered]@{ name = "Pushed by"; value = "${{ github.actor }}"; inline = $true }
-                [ordered]@{ name = "Status";    value = "PSS FleetTools restarted with latest production code." }
-              )
-              footer = [ordered]@{ text = "GitHub Actions - Self-hosted Runner" }
-            })
-          }
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
-          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
+          COMMIT=$(echo "${{ github.sha }}" | cut -c1-7)
+          AUTHOR="${{ github.actor }}"
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"embeds\":[{\"title\":\"Step 4/4: Bot Started - Deployment Complete\",\"color\":3066993,\"fields\":[{\"name\":\"Commit\",\"value\":\"$COMMIT\",\"inline\":true},{\"name\":\"Pushed by\",\"value\":\"$AUTHOR\",\"inline\":true},{\"name\":\"Status\",\"value\":\"PSS FleetTools restarted with latest production code.\"}],\"footer\":{\"text\":\"GitHub Actions - Self-hosted Runner\"}}]}"
 
       - name: Notify Discord on failure
         if: steps.start_bot.outcome == 'failure' || steps.start_bot.outcome == 'skipped'
         run: |
-          $webhookUrl = "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          if (-not $webhookUrl) { exit 0 }
-          $body = [ordered]@{
-            embeds = @([ordered]@{
-              title = "Production Deployment Failed - PSS FleetTools"
-              color = 15158332
-              fields = @(
-                [ordered]@{ name = "Commit";           value = "${{ github.sha }}".Substring(0,7); inline = $true }
-                [ordered]@{ name = "Pushed by";        value = "${{ github.actor }}"; inline = $true }
-                [ordered]@{ name = "Stop Bot";         value = "${{ steps.stop_bot.outcome }}";     inline = $true }
-                [ordered]@{ name = "Checkout";         value = "${{ steps.checkout.outcome }}";     inline = $true }
-                [ordered]@{ name = "Copy Credentials"; value = "${{ steps.copy_private.outcome }}"; inline = $true }
-                [ordered]@{ name = "Install Deps";     value = "${{ steps.install_deps.outcome }}"; inline = $true }
-                [ordered]@{ name = "Start Bot";        value = "${{ steps.start_bot.outcome }}";    inline = $true }
-              )
-              footer = [ordered]@{ text = "GitHub Actions - Check runner logs for details" }
-            })
-          }
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10 -Compress))
-          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK_URL }}"
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
+          COMMIT=$(echo "${{ github.sha }}" | cut -c1-7)
+          AUTHOR="${{ github.actor }}"
+          STOP_OUTCOME="${{ steps.stop_bot.outcome }}"
+          CHECKOUT_OUTCOME="${{ steps.checkout.outcome }}"
+          COPY_OUTCOME="${{ steps.copy_private.outcome }}"
+          DEPS_OUTCOME="${{ steps.install_deps.outcome }}"
+          START_OUTCOME="${{ steps.start_bot.outcome }}"
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"embeds\":[{\"title\":\"Production Deployment Failed - PSS FleetTools\",\"color\":15158332,\"fields\":[{\"name\":\"Commit\",\"value\":\"$COMMIT\",\"inline\":true},{\"name\":\"Pushed by\",\"value\":\"$AUTHOR\",\"inline\":true},{\"name\":\"Stop Bot\",\"value\":\"$STOP_OUTCOME\",\"inline\":true},{\"name\":\"Checkout\",\"value\":\"$CHECKOUT_OUTCOME\",\"inline\":true},{\"name\":\"Copy Credentials\",\"value\":\"$COPY_OUTCOME\",\"inline\":true},{\"name\":\"Install Deps\",\"value\":\"$DEPS_OUTCOME\",\"inline\":true},{\"name\":\"Start Bot\",\"value\":\"$START_OUTCOME\",\"inline\":true}],\"footer\":{\"text\":\"GitHub Actions - Check runner logs for details\"}}]}"
