@@ -429,6 +429,7 @@ class CacheManager:
             # Validate serializability before touching the real file
             json.dumps(data, ensure_ascii=False, default=self._json_default)
             self._atomic_json_write(file_path, data)
+
             return True
         except TypeError as e:
             logger.critical(f"Serialization error saving {key}: {e}")
