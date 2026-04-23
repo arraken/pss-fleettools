@@ -137,6 +137,11 @@ async def get_active_engagements(bot: "FleetToolsBot") -> List[EngagementSystemD
     async with get_session() as session:
         last_engagement_id = await crud.get_max_engagement_id(session)
 
+    # Never start scanning below 2000 — engagement IDs below that are ancient history
+    if last_engagement_id < 2000:
+        bot.logger.info(f"Max engagement ID in DB is {last_engagement_id} (<2000), clamping scan start to 2000.")
+        last_engagement_id = 2000
+
     await bot.api_manager.ensure_valid_token_age()
     await asyncio.sleep(0.5)
 

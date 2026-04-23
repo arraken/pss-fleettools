@@ -40,9 +40,11 @@ async def get_max_engagement_id(session: AsyncSession) -> int:
         stmt = select(models.Engagement.engagement_id).order_by(models.Engagement.engagement_id.desc()).limit(1)
         result = await session.exec(stmt)
         row = result.first()
+        if int(row) < 2000:
+            return 2000
         return int(row) if row is not None else 0
     except Exception:
-        return 0
+        return 2000
 
 async def mark_engagement_inactive(session: AsyncSession, engagement_id: int) -> bool:
     try:
