@@ -269,6 +269,27 @@ class CacheManager:
     def clear_prestige_recipes(self) -> bool:
         return self.save_json("prestige_recipes", {})
 
+    async def rebuild_prestige_recipes(self) -> None:
+        """Publicly force a full prestige recipe rebuild from the API."""
+        from handlers import prestigehandler
+
+        self.bot.logger.info("[Rebuild] Clearing prestige recipe cache...")
+        self.clear_prestige_recipes()
+        self.api_prestige_recipes.clear()
+        self.prestige_build_status = "building_from_api"
+
+        self.bot.logger.info("[Rebuild] Rebuilding prestige recipes from API...")
+        try:
+            new_recipes = await prestigehandler.build_prestige_recipes(self.bot)
+            self.api_prestige_recipes = new_recipes
+            self.save_prestige_recipes_data()
+            self.prestige_build_status = "complete"
+            total = sum(len(v) for v in new_recipes.values())
+            self.bot.logger.info(f"[Rebuild] ✅ Prestige recipes rebuilt: {total} recipes.")
+        except Exception as e:
+            self.prestige_build_status = "failed"
+            self.bot.logger.error(f"[Rebuild] ❌ Failed to rebuild prestige recipes: {e}")
+
     async def load_api_prestige_recipes(self) -> None:
         # Wait for crew list to load first
         max_wait = 30

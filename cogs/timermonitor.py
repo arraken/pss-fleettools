@@ -59,8 +59,8 @@ class TimerMonitor(commands.Cog):
     async def before_galaxy_state_refresh(self):
         await self.bot.wait_until_ready()
 
-    # Fires every day at UTC 00:00:00; only acts on the 1st of the month.
-    @tasks.loop(time=dt_time(0, 0, 0, tzinfo=timezone.utc))
+    # Fires every day at UTC 00:05:00; only acts on the 1st of the month.
+    @tasks.loop(time=dt_time(0, 5, 0, tzinfo=timezone.utc))
     async def monthly_prestige_rebuild(self):
         if datetime.now(timezone.utc).day != 1:
             return
@@ -74,25 +74,11 @@ class TimerMonitor(commands.Cog):
     async def before_monthly_prestige_rebuild(self):
         await self.bot.wait_until_ready()
 
+    async def forced_prestige_rebuild(self):
+        await self._monthly_prestige_rebuild_inner()
+
     async def _monthly_prestige_rebuild_inner(self):
-        from handlers import prestigehandler
-
-        self.bot.logger.info("[Monthly] Clearing prestige recipe cache...")
-        self.bot.cache_manager.clear_prestige_recipes()
-        self.bot.cache_manager.api_prestige_recipes.clear()
-        self.bot.cache_manager.prestige_build_status = "building_from_api"
-
-        self.bot.logger.info("[Monthly] Rebuilding prestige recipes from API...")
-        try:
-            new_recipes = await prestigehandler.build_prestige_recipes(self.bot)
-            self.bot.cache_manager.api_prestige_recipes = new_recipes
-            self.bot.cache_manager.save_prestige_recipes_data()
-            self.bot.cache_manager.prestige_build_status = "complete"
-            total = sum(len(v) for v in new_recipes.values())
-            self.bot.logger.info(f"[Monthly] ✅ Prestige recipes rebuilt: {total} recipes.")
-        except Exception as e:
-            self.bot.cache_manager.prestige_build_status = "failed"
-            self.bot.logger.error(f"[Monthly] ❌ Failed to rebuild prestige recipes: {e}")
+        await self.bot.cache_manager.rebuild_prestige_recipes()
 
     async def _engagements_pulse_inner(self):
         self.bot.logger.info(f"Starting engagements pulse at {datetime.now(timezone.utc).isoformat()}")

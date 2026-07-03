@@ -14,6 +14,7 @@ class FleetToolsBot(commands.Bot):
         # These are set during setup_hook after the engine is ready
         self.api_manager = None
         self.cache_manager = None
+        self.timer_monitor = None
 
     async def setup_hook(self) -> None:
         #from handlers.databasehandler import init_engine
@@ -29,11 +30,13 @@ class FleetToolsBot(commands.Bot):
 
         self.api_manager = ApiManager(self)
         self.cache_manager = CacheManager(self)
+        timer_monitor = TimerMonitor(self)
+        self.timer_monitor = timer_monitor
 
         await self.cache_manager.load_active_engagements_from_db()
         await self.cache_manager.load_galaxy_systems_from_db()
 
-        await self.add_cog(TimerMonitor(self))
+        await self.add_cog(timer_monitor)
         await self.add_cog(Commands(self))
 
         await self.tree.sync()

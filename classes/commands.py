@@ -202,6 +202,13 @@ class Commands(commands.Cog):
         # Only pass view if it's not None
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="regen_prestige", description="regen prestige recipes")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def regen_prestige_recipes(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        await self.bot.cache_manager.rebuild_prestige_recipes()
+        await interaction.followup.send("Prestige recipes have been regenerated")
+
     @app_commands.command(name="helpfleettools", description="List all available FleetTools commands and their arguments")
     async def helpfleettools(self, interaction: discord.Interaction) -> None:
         embed = discord.Embed(
