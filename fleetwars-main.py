@@ -23,8 +23,6 @@ def setup_logging() -> None:
 async def main() -> None:
     setup_logging()
     intents = discord.Intents.default()
-    intents.members = True
-    intents.message_content = True
     intents.guilds = True
     bot = FleetToolsBot(intents=intents)
     async with bot:

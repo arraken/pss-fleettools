@@ -264,3 +264,39 @@ class Commands(commands.Cog):
             for guild in self.bot.guilds:
                 self.bot.logger.info(f"Found guild: {guild.name} - ID: {guild.id}")
 
+    @app_commands.command(name="prestige_status", description="Show prestige recipe cache/storage status")
+    async def prestige_status(self, interaction: discord.Interaction):
+        meta = self.bot.cache_manager.get_prestige_meta()
+        cached_recipe_count = sum(len(r) for r in self.bot.cache_manager.api_prestige_recipes.values())
+
+        last_attempt_start = meta.get("last_attempt_start")
+        last_success = meta.get("last_success")
+        saved_recipe_count = meta.get("recipe_count")
+
+        embed = discord.Embed(
+            title="Prestige Recipe Status",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Recipes currently in memory", value=str(cached_recipe_count), inline=False)
+        embed.add_field(name="Last successful rebuild", value=str(last_success or "Never recorded"), inline=False)
+        embed.add_field(name="Recipes at last successful rebuild",
+                        value=str(saved_recipe_count if saved_recipe_count is not None else "Unknown"), inline=False)
+        embed.add_field(name="Last rebuild attempt started", value=str(last_attempt_start or "Never recorded"),
+                        inline=False)
+
+        # Warn if the most recent attempt is newer than the most recent success -
+        # that means a regen was started but never finished (e.g. bot was
+        # restarted mid-build), so the data on disk/in-memory is stale.
+        if last_attempt_start and (not last_success or last_attempt_start > last_success):
+            embed.color = discord.Color.orange()
+            embed.add_field(
+                name="⚠️ Warning",
+                value=(
+                    "The last rebuild attempt appears to have never completed "
+                    "(likely interrupted by a bot restart). The recipes shown above "
+                    "are from an earlier, older rebuild. Try running /regen_prestige again."
+                ),
+                inline=False
+            )
+
+        await interaction.followup.send(embed=embed)
