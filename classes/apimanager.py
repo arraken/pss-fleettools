@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 _FUZZY_MATCH_THRESHOLD = 80
 
 DEV_USER_ID = 210545386580869121
-DEBUG_CHANNEL = 1400497125850349759
+DEBUG_CHANNEL = 1485646667196923914
 
 class ApiManager:
     def __init__(self, bot: "FleetToolsBot"):
@@ -277,7 +277,8 @@ class ApiManager:
     def _parse_market_price(argument: str) -> str:
         """
         Try to extract a human-readable price string from the argument field.
-        PSS typically encodes it as "price||currency" or "price|currency".
+        PSS typically encodes it as "price||currency" or "price|currency", but for plain
+        Starbux listings it may just be a bare number with no currency component.
         Returns an empty string if nothing useful is found.
         """
         if not argument:
@@ -287,8 +288,11 @@ class ApiManager:
         # Expect at least [price, currency]; may have more fields before/after.
         # Find the first part that looks like a number (the price).
         for i, part in enumerate(parts):
-            if part.isdigit() and i + 1 < len(parts):
-                return f" for {part} {parts[i + 1]}"
+            if part.isdigit():
+                if i + 1 < len(parts):
+                    return f" for {part} {parts[i + 1]}"
+                # No currency component present — PSS market listings default to Starbux.
+                return f" for {part} Starbux"
         return ""
 
     def process_market_data(self, data: Dict):
@@ -297,6 +301,17 @@ class ApiManager:
         formatted = self._format_market_message(message)
         # Buffer the message; the flush loop sends batches to avoid rate limits.
         self._market_message_queue.append(formatted)
+
+        # Diagnostic: log the raw payload once so we can confirm the actual field
+        # names/format PSS sends for prices. logger.debug is silenced by the app's
+        # INFO-level logging.basicConfig, so use warning until this is confirmed working.
+        activity = message.activity_type_enum
+        if activity in (
+            pssapi.enums.ActivityType.MARKET_SOLD,
+            pssapi.enums.ActivityType.MARKET_LISTED,
+            pssapi.enums.ActivityType.MARKET_EXPIRED,
+        ) and not (message.argument or message.activity_argument):
+            self.bot.logger.warning(f"[MarketWatch] Raw payload with no argument/activity_argument: {data!r}")
 
     async def _flush_market_queue(self) -> None:
         """Drain the queue and send all pending lines as one or more batched Discord messages to every configured channel."""
@@ -364,7 +379,16 @@ class ApiManager:
         raw_text = (message.message or "").strip()
         actor = message.user_name or "Unknown"
         activity = message.activity_type_enum
-        price_str = self._parse_market_price(message.argument)
+        # Price data is usually in `argument`, but some payloads only populate `activity_argument`.
+        price_str = self._parse_market_price(message.argument) or self._parse_market_price(message.activity_argument)
+        if not price_str and activity in (
+            pssapi.enums.ActivityType.MARKET_SOLD,
+            pssapi.enums.ActivityType.MARKET_LISTED,
+            pssapi.enums.ActivityType.MARKET_EXPIRED,
+        ):
+            self.bot.logger.warning(
+                f"[MarketWatch] No price parsed — argument={message.argument!r} activity_argument={message.activity_argument!r}"
+            )
 
         if activity == pssapi.enums.ActivityType.MARKET_SOLD:
             m = self._MARKET_SOLD_RE.match(raw_text)
