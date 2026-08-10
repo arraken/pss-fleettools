@@ -40,6 +40,7 @@ class ApiManager:
         self.__token_lock = asyncio.Lock()
         self.__token_max_age = timedelta(minutes=4) # Slightly faster than engagement pulses to ensure it's always accurate
         self.__uuid_token: Optional[str] = None
+        self.__device_user_id: Optional[int] = None
         self.__max_call_retries = 3
         self.__retry_interval_step = 1
         self.__token_refresh_in_progress = False  # Flag to suppress duplicate error logs
@@ -103,6 +104,7 @@ class ApiManager:
             return None
 
         self.bot.logger.info(f"Successfully generated new PSS access token. {user_login.access_token}")
+        self.__device_user_id = user_login.user_id
         return user_login.access_token
 
     async def ensure_valid_token_age(self) -> None:
