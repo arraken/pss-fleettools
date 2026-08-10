@@ -4,7 +4,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from handlers import fleetwarshandler
+from handlers import fleetwarshandler, databasehandler
+from handlers.databasehandler import get_session
 
 if TYPE_CHECKING:
     from classes.bot import FleetToolsBot
@@ -257,6 +258,16 @@ class Commands(commands.Cog):
             inline=False,
         )
 
+        embed.add_field(
+            name="`/set_marketwatch_channel`",
+            value=(
+                "**Admin only.** Sets the channel where market watch (buy/sell) updates are posted for this server.\n"
+                "**Optional**\n"
+                "• `channel` — the text channel to post updates to. Omit to stop market watch for this server."
+            ),
+            inline=False,
+        )
+
         embed.set_footer(text="FleetTools  •  Use / to autocomplete any command")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -264,6 +275,45 @@ class Commands(commands.Cog):
             for guild in self.bot.guilds:
                 self.bot.logger.info(f"Found guild: {guild.name} - ID: {guild.id}")
 
+
+    @app_commands.command(name="market_watch", description="(Re)starts the market watch background feed")
+    async def market_watch_command(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            self.bot.api_manager.start_market_watch()
+            await interaction.followup.send("✅ Market watch (re)started — check logs for the live feed.", ephemeral=True)
+        except Exception as e:
+            self.bot.logger.error(f"[market_watch] Failed to start market watch: {e}", exc_info=e)
+            await interaction.followup.send(f"❌ Market watch failed to start: `{e}`", ephemeral=True)
+
+    @app_commands.command(name="set_marketwatch_channel", description="Set (or clear) the channel where market watch updates are posted for this server")
+    @app_commands.describe(channel="Channel to post market updates to. Omit / choose none to stop market watch for this server.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def set_marketwatch_channel(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.guild is None:
+            await interaction.followup.send("❌ This command can only be used in a server.", ephemeral=True)
+            return
+
+        guild_id = interaction.guild.id
+
+        try:
+            async with get_session() as session:
+                if channel is None:
+                    removed = await databasehandler.delete_alert_channel(session, guild_id, channel_type="marketwatch")
+                    self.bot.api_manager.clear_market_watch_channel(guild_id)
+                    if removed:
+                        await interaction.followup.send("🛑 Market watch channel cleared — pusher stopped for this server.", ephemeral=True)
+                    else:
+                        await interaction.followup.send("ℹ️ No market watch channel was configured for this server.", ephemeral=True)
+                else:
+                    await databasehandler.upsert_alert_channel(session, guild_id, channel.id, channel_type="marketwatch")
+                    self.bot.api_manager.set_market_watch_channel(guild_id, channel.id)
+                    await interaction.followup.send(f"✅ Market watch will now post updates to {channel.mention}.", ephemeral=True)
+        except Exception as e:
+            self.bot.logger.error(f"Error in /set_marketwatch_channel: {e}", exc_info=e)
+            await interaction.followup.send("❌ Failed to update the market watch channel.", ephemeral=True)
     @app_commands.command(name="prestige_status", description="Show prestige recipe cache/storage status")
     async def prestige_status(self, interaction: discord.Interaction):
         meta = self.bot.cache_manager.get_prestige_meta()

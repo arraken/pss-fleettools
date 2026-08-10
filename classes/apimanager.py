@@ -1,7 +1,8 @@
 import asyncio
 import uuid
+import re
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Dict as _Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import aiohttp
 import pssapi
@@ -9,6 +10,7 @@ from discord.app_commands.errors import CommandInvokeError
 from pssapi import PssApiClient
 from pssapi.entities.character import Character as _Characters
 from pssapi.utils.exceptions import PssApiError
+from pssapi.exc import PusherConnectionClosed
 from fuzzywuzzy import fuzz
 
 from data.constants.galaxy import STAR_SYSTEMS as STAR_SYSTEM_IDS
@@ -20,6 +22,9 @@ if TYPE_CHECKING:
     from classes.bot import FleetToolsBot
 
 _FUZZY_MATCH_THRESHOLD = 80
+
+DEV_USER_ID = 210545386580869121
+DEBUG_CHANNEL = 1400497125850349759
 
 class ApiManager:
     def __init__(self, bot: "FleetToolsBot"):
@@ -38,6 +43,11 @@ class ApiManager:
         self.__max_call_retries = 3
         self.__retry_interval_step = 1
         self.__token_refresh_in_progress = False  # Flag to suppress duplicate error logs
+        self._market_watch_task: Optional[asyncio.Task] = None
+        self._market_flush_task: Optional[asyncio.Task] = None
+        self._market_message_queue: List[str] = []
+        self._market_watch_channels: Dict[int, int] = {}  # guild_id -> channel_id
+        self.pusher = pssapi.pusher.Pusher
 
     # ------------------------------------------------------------------
     # Properties
@@ -137,6 +147,248 @@ class ApiManager:
     async def get_token(self) -> Optional[str]:
         async with self.__token_lock:
             return self.__access_token
+
+    # Market stuff
+
+    async def market_watch_api(self):
+        """Single Pusher run — blocks until the connection closes or errors."""
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+        await self.ensure_valid_token_age()
+        async with self.__token_lock:
+            access_token = self.__access_token
+        device_user_id = self.__device_user_id
+
+        if not access_token or not device_user_id:
+            raise RuntimeError(
+                "Cannot start market watch: no valid device access token or device user ID. "
+                "Token generation may have failed."
+            )
+
+        # Reset class-level Pusher state from any previous run.
+        if self.pusher._scheduler.running:
+            self.pusher._scheduler.shutdown(wait=False)
+        self.pusher._scheduler = AsyncIOScheduler()
+
+        if self.pusher._connection is not None:
+            try:
+                await self.pusher._connection.close()
+            except Exception:
+                pass
+        self.pusher._connection = None
+        self.pusher._socket_id = ""
+        self.pusher._channels.clear()
+
+        market_channel = pssapi.pusher.Channel(pssapi.enums.PusherChannelType.MARKET)
+        market_channel.on_message(self.process_market_data)
+        self.pusher.add(market_channel)
+
+        await self.pusher.run(access_token, device_user_id)
+
+    async def _notify_market_watch_dropped(self, reason: str) -> None:
+        """Send a Discord alert to DEBUG_CHANNEL mentioning the dev."""
+        try:
+            channel = await self.bot.retrieve_channel(DEBUG_CHANNEL)
+            if channel:
+                await channel.send(
+                    f"<@{DEV_USER_ID}> ⚠️ **Market Watch** connection dropped — reconnecting automatically.\n"
+                    f"```{reason}```"
+                )
+        except Exception as e:
+            self.bot.logger.error(f"[MarketWatch] Failed to send drop notification: {e}")
+
+    async def _market_watch_loop(self) -> None:
+        """Infinite reconnect loop. Runs as a background task for the bot's lifetime."""
+        while True:
+            try:
+                await self.market_watch_api()
+                # market_watch_api() only returns without exception on a clean exit.
+                self.bot.logger.warning("[MarketWatch] Connection exited cleanly. Reconnecting in 10 s…")
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                return
+            except PusherConnectionClosed as e:
+                self.bot.logger.warning(f"[MarketWatch] Connection closed: {e}. Reconnecting in 10 s…")
+                await self._notify_market_watch_dropped(str(e))
+                await asyncio.sleep(10)
+            except Exception as e:
+                self.bot.logger.error(f"[MarketWatch] Unexpected error: {e}", exc_info=e)
+                await self._notify_market_watch_dropped(str(e))
+                await asyncio.sleep(30)
+
+    def is_market_watch_running(self) -> bool:
+        return bool(self._market_watch_task) and not self._market_watch_task.done()
+
+    def start_market_watch(self) -> None:
+        """Create (or restart) the market watch background task."""
+        if self._market_watch_task and not self._market_watch_task.done():
+            self._market_watch_task.cancel()
+        if self._market_flush_task and not self._market_flush_task.done():
+            self._market_flush_task.cancel()
+        self._market_message_queue.clear()
+        self._market_watch_task = asyncio.ensure_future(self._market_watch_loop())
+        self._market_flush_task = asyncio.ensure_future(self._market_flush_loop())
+
+    def stop_market_watch(self) -> None:
+        """Cancel the market watch background tasks entirely."""
+        if self._market_watch_task and not self._market_watch_task.done():
+            self._market_watch_task.cancel()
+        if self._market_flush_task and not self._market_flush_task.done():
+            self._market_flush_task.cancel()
+        self._market_watch_task = None
+        self._market_flush_task = None
+        self._market_message_queue.clear()
+
+    def load_market_watch_channels(self, channels: Dict[int, int]) -> None:
+        """Bulk-load guild_id -> channel_id mappings (used on startup from DB)."""
+        self._market_watch_channels.update(channels)
+
+    def set_market_watch_channel(self, guild_id: int, channel_id: int) -> None:
+        """Register/update the market watch output channel for a guild, starting the pusher if it isn't already running."""
+        self._market_watch_channels[guild_id] = channel_id
+        if not self.is_market_watch_running():
+            self.start_market_watch()
+
+    def clear_market_watch_channel(self, guild_id: int) -> bool:
+        """Remove a guild's market watch channel. Stops the pusher entirely once no channels remain."""
+        existed = self._market_watch_channels.pop(guild_id, None) is not None
+        if not self._market_watch_channels:
+            self.stop_market_watch()
+        return existed
+
+    # PSS sends short message texts; the actor is always in user_name.
+    # SOLD:    message = "Bought {qty} {item} from {seller}"   user_name = buyer
+    # LISTED:  message = "Selling {qty} {item}"                user_name = seller
+    # EXPIRED: message = "Expired {qty} {item}" (or similar)  user_name = seller
+    # Price/currency live in the argument field as "price||currency" or similar.
+    _MARKET_SOLD_RE = re.compile(
+        r"^Bought (?P<qty>\d+) (?P<item>.+?) from (?P<seller>.+?)$"
+    )
+    _MARKET_LISTED_RE = re.compile(
+        r"^Selling (?P<qty>\d+) (?P<item>.+?)$"
+    )
+    _MARKET_EXPIRED_RE = re.compile(
+        r"^Expired (?P<qty>\d+) (?P<item>.+?)$"
+    )
+
+    @staticmethod
+    def _parse_market_price(argument: str) -> str:
+        """
+        Try to extract a human-readable price string from the argument field.
+        PSS typically encodes it as "price||currency" or "price|currency".
+        Returns an empty string if nothing useful is found.
+        """
+        if not argument:
+            return ""
+        sep = "||" if "||" in argument else "|"
+        parts = [p.strip() for p in argument.split(sep) if p.strip()]
+        # Expect at least [price, currency]; may have more fields before/after.
+        # Find the first part that looks like a number (the price).
+        for i, part in enumerate(parts):
+            if part.isdigit() and i + 1 < len(parts):
+                return f" for {part} {parts[i + 1]}"
+        return ""
+
+    def process_market_data(self, data: Dict):
+        message = pssapi.entities.Message(data)
+
+        formatted = self._format_market_message(message)
+        # Buffer the message; the flush loop sends batches to avoid rate limits.
+        self._market_message_queue.append(formatted)
+
+    async def _flush_market_queue(self) -> None:
+        """Drain the queue and send all pending lines as one or more batched Discord messages to every configured channel."""
+        if not self._market_message_queue:
+            return
+
+        if not self._market_watch_channels:
+            self._market_message_queue.clear()
+            return
+
+        # Snapshot and clear atomically so new messages keep arriving cleanly.
+        pending = self._market_message_queue.copy()
+        self._market_message_queue.clear()
+
+        # Pack lines into ≤ 1990-char chunks (Discord limit is 2000).
+        batches: List[str] = []
+        batch: List[str] = []
+        batch_len = 0
+        for line in pending:
+            # +1 for the joining newline
+            if batch and batch_len + len(line) + 1 > 1990:
+                batches.append("\n".join(batch))
+                batch = []
+                batch_len = 0
+            batch.append(line)
+            batch_len += len(line) + 1
+        if batch:
+            batches.append("\n".join(batch))
+
+        # De-duplicate target channel IDs in case multiple guilds share one channel.
+        for channel_id in set(self._market_watch_channels.values()):
+            try:
+                channel = await self.bot.retrieve_channel(channel_id)
+                if not channel:
+                    self.bot.logger.error(f"[MarketWatch] Channel {channel_id} not found.")
+                    continue
+                for message in batches:
+                    await channel.send(message)
+            except Exception as e:
+                self.bot.logger.error(f"[MarketWatch] Failed to flush message queue to channel {channel_id}: {e}")
+
+    async def _market_flush_loop(self) -> None:
+        """Periodically flush buffered market messages to Discord (every 4 s)."""
+        while True:
+            try:
+                await asyncio.sleep(4)
+                await self._flush_market_queue()
+            except asyncio.CancelledError:
+                # Final flush before exit so no messages are lost.
+                await self._flush_market_queue()
+                return
+            except Exception as e:
+                self.bot.logger.error(f"[MarketWatch] Flush loop error: {e}")
+
+    def _format_market_message(self, message) -> str:
+        """Return a Discord-ready market event string with ship names in backticks."""
+        ts = message.message_date
+        if ts:
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            ts_str = "??-??-?? ??:??:??"
+
+        raw_text = (message.message or "").strip()
+        actor = message.user_name or "Unknown"
+        activity = message.activity_type_enum
+        price_str = self._parse_market_price(message.argument)
+
+        if activity == pssapi.enums.ActivityType.MARKET_SOLD:
+            m = self._MARKET_SOLD_RE.match(raw_text)
+            if m:
+                return (
+                    f"{ts_str} - `{actor}` bought {m['qty']} {m['item']}"
+                    f" from `{m['seller']}`{price_str}"
+                )
+
+        elif activity == pssapi.enums.ActivityType.MARKET_LISTED:
+            m = self._MARKET_LISTED_RE.match(raw_text)
+            if m:
+                return (
+                    f"{ts_str} - `{actor}` is selling {m['qty']} {m['item']}{price_str}"
+                )
+
+        elif activity == pssapi.enums.ActivityType.MARKET_EXPIRED:
+            m = self._MARKET_EXPIRED_RE.match(raw_text)
+            if m:
+                return (
+                    f"{ts_str} - `{actor}`'s listing of {m['qty']} {m['item']} expired{price_str}"
+                )
+
+        # Fallback: actor + raw PSS text (regex didn't match — check DEBUG log).
+        return f"{ts_str} - `{actor}` {raw_text}" if raw_text else f"{ts_str} - (no text, activity={message.activity_type})"
+
 
     # ------------------------------------------------------------------
     # PSS API wrappers

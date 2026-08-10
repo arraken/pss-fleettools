@@ -44,6 +44,23 @@ class FleetToolsBot(commands.Bot):
 
     async def on_ready(self) -> None:
         self.logger.info(f"Logged in as {self.user} ({self.user.id})")
+        await self._load_market_watch_channels()
+
+    async def _load_market_watch_channels(self) -> None:
+        """Load configured market watch channels from the DB and (re)start the pusher if any are set."""
+        from handlers import databasehandler
+        from handlers.databasehandler import get_session
+
+        try:
+            async with get_session() as session:
+                rows = await databasehandler.get_all_alert_channels(session, channel_type="marketwatch")
+            channels = {row.guild_id: row.channel_id for row in rows}
+            self.api_manager.load_market_watch_channels(channels)
+            if channels:
+                self.api_manager.start_market_watch()
+                self.logger.info(f"Market watch auto-started for {len(channels)} guild(s).")
+        except Exception as e:
+            self.logger.error(f"Failed to load market watch channels: {e}", exc_info=e)
 
     async def retrieve_channel(self, channel_id: int) -> Optional[discord.TextChannel]:
         """Fetch a channel by ID from cache, falling back to an API call."""
