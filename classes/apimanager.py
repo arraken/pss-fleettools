@@ -11,6 +11,7 @@ from pssapi import PssApiClient
 from pssapi.entities.character import Character as _Characters
 from pssapi.utils.exceptions import PssApiError
 from pssapi.exc import PusherConnectionClosed
+from pss_fleet_data import PssFleetDataClient
 from fuzzywuzzy import fuzz
 
 from data.constants.galaxy import STAR_SYSTEMS as STAR_SYSTEM_IDS
@@ -35,6 +36,9 @@ class ApiManager:
         self._http_session_lock = asyncio.Lock()
 
         self.__client = PssApiClient()
+        self.__fleet_data_client = PssFleetDataClient()
+        self.__division_letter_map: Optional[Dict[int, str]] = None
+        self.__division_letter_map_lock = asyncio.Lock()
         self.__access_token: Optional[str] = None
         self.__access_token_age: Optional[datetime] = None
         self.__token_lock = asyncio.Lock()
@@ -57,6 +61,10 @@ class ApiManager:
     @property
     def client(self) -> PssApiClient:
         return self.__client
+
+    @property
+    def fleet_data_client(self) -> PssFleetDataClient:
+        return self.__fleet_data_client
 
     # ------------------------------------------------------------------
     # UUID / Token management
@@ -433,6 +441,19 @@ class ApiManager:
 
     async def get_user_by_name(self, name: str):
         return await self._make_api_call(self.client.user_service.search_users, name)
+
+    async def get_division_letter_map(self) -> Dict[int, str]:
+        """Returns a cached mapping of `division_design_id` to its short letter (e.g. "A", "B")."""
+        async with self.__division_letter_map_lock:
+            if self.__division_letter_map is None:
+                designs = await self._make_api_call(self.client.division_service.list_all_division_designs)
+                letter_map: Dict[int, str] = {}
+                for design in designs:
+                    name_parts = (design.division_name or "").split()
+                    if name_parts and len(name_parts[-1]) == 1:
+                        letter_map[design.division_design_id] = name_parts[-1]
+                self.__division_letter_map = letter_map
+            return self.__division_letter_map
 
     async def get_crew_by_name(self, crew_name: str):
         crew_list = await self._make_api_call(self.client.character_service.list_all_character_designs)

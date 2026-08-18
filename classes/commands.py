@@ -210,6 +210,34 @@ class Commands(commands.Cog):
         await self.bot.cache_manager.rebuild_prestige_recipes()
         await interaction.followup.send("Prestige recipes have been regenerated")
 
+    @app_commands.command(name="player_history", description="Show a player's entire recorded history as a table image")
+    @app_commands.describe(player="Player name or numeric player ID")
+    async def player_history(self, interaction: discord.Interaction, player: str):
+        from handlers import playerhistoryhandler
+
+        await interaction.response.defer()
+        try:
+            try:
+                user_id, player_name = await playerhistoryhandler.resolve_player(self.bot, player)
+            except playerhistoryhandler.PlayerNotFoundError as e:
+                await interaction.followup.send(f"❌ {e}", ephemeral=True)
+                return
+
+            history = await playerhistoryhandler.fetch_full_user_history(self.bot, user_id)
+            if not history:
+                await interaction.followup.send(f"❌ No history found for **{player_name}**.", ephemeral=True)
+                return
+
+            player_name = playerhistoryhandler.get_latest_player_name(history, player_name)
+            rows = await playerhistoryhandler.build_history_rows(self.bot, player_name, history)
+            image_buffer = playerhistoryhandler.render_history_image(player_name, rows)
+
+            file = discord.File(image_buffer, filename=f"{player_name}_history.png")
+            await interaction.followup.send(file=file)
+        except Exception as e:
+            self.bot.logger.error(f"Error in /player_history: {e}", exc_info=e)
+            await interaction.followup.send("❌ Error fetching player history.", ephemeral=True)
+
     @app_commands.command(name="helpfleettools", description="List all available FleetTools commands and their arguments")
     async def helpfleettools(self, interaction: discord.Interaction) -> None:
         embed = discord.Embed(
@@ -264,6 +292,17 @@ class Commands(commands.Cog):
                 "**Admin only.** Sets the channel where market watch (buy/sell) updates are posted for this server.\n"
                 "**Optional**\n"
                 "• `channel` — the text channel to post updates to. Omit to stop market watch for this server."
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="`/player_history`",
+            value=(
+                "Show a player's entire recorded month-by-month history (rank, fleet, division, stars, trophies) "
+                "as a spreadsheet-style image. Missing months are shown as `-`.\n"
+                "**Required**\n"
+                "• `player` — a player name or a numeric player ID"
             ),
             inline=False,
         )
