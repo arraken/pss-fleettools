@@ -238,6 +238,25 @@ class Commands(commands.Cog):
             self.bot.logger.error(f"Error in /player_history: {e}", exc_info=e)
             await interaction.followup.send("❌ Error fetching player history.", ephemeral=True)
 
+    @app_commands.command(name="search_engagements", description="Search engagements for the fleet name and number of engagements to return")
+    @app_commands.describe(fleet_name="Fleet name to search for", limit="Number of engagements to return (default: 5)")
+    async def search_engagements(self, interaction: discord.Interaction, fleet_name: str, limit: int = 5):
+        await interaction.response.defer()
+        if limit > 20:
+            await interaction.followup.send("❌ Limit cannot exceed 15.", ephemeral=True)
+            return
+        try:
+            engagements = await fleetwarshandler.search_engagements_by_fleet(self.bot, fleet_name, limit)
+            if not engagements:
+                await interaction.followup.send(f"❌ No engagements found for fleet: {fleet_name}", ephemeral=True)
+                return
+
+            embed = await fleetwarshandler.create_engagement_search_embed(engagements, fleet_name)
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            self.bot.logger.error(f"Error in /search_engagements: {e}", exc_info=e)
+            await interaction.followup.send("❌ Error searching engagements.", ephemeral=True)
+
     @app_commands.command(name="helpfleettools", description="List all available FleetTools commands and their arguments")
     async def helpfleettools(self, interaction: discord.Interaction) -> None:
         embed = discord.Embed(

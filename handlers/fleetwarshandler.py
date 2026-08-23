@@ -132,6 +132,70 @@ async def get_system_status(bot: "FleetToolsBot", system_name: str) -> Optional[
         'owner': owner_name,
         'cooldown': cooldown_status
     }
+
+async def search_engagements_by_fleet(bot: "FleetToolsBot", fleet_name: str, limit: int = 5) -> List[EngagementSystemData]:
+    async with get_session() as session:
+        engagements = await crud.get_engagements_by_fleet(session, fleet_name, active_only=False)
+
+    # Sort by start_time descending
+    sorted_engagements = sorted(engagements, key=lambda e: e.start_time or datetime.min, reverse=True)
+
+    # Limit results
+    limited_engagements = sorted_engagements[:limit]
+
+    # Convert to EngagementSystemData
+    engagement_data_list = [
+        EngagementSystemData(
+            active=e.active,
+            attacker=e.attacker,
+            defender=e.defender,
+            engagement_id=e.engagement_id,
+            system_id=e.system_id,
+            start_time=e.start_time,
+            end_time=e.end_time,
+            outcome=e.outcome,
+            final_score=e.final_score,
+            engagement_type=e.engagement_type
+        )
+        for e in limited_engagements
+    ]
+
+    return engagement_data_list
+
+async def create_engagement_search_embed(engagements: List[EngagementSystemData], fleet_name: str) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"🔍 Engagements for Fleet: {fleet_name}",
+        description=f"Showing the {len(engagements)} most recent engagements.",
+        color=0x00FF00
+    )
+
+    if not engagements:
+        embed.description = f"No engagements found for fleet: {fleet_name}."
+        return embed
+
+    for eng in engagements:
+        system_name = STAR_SYSTEMS.get(eng.system_id, f"System #{eng.system_id}")
+        start_time_str = eng.start_time.strftime("%Y-%m-%d %H:%M UTC") if eng.start_time else "Unknown"
+        end_time_str = eng.end_time.strftime("%Y-%m-%d %H:%M UTC") if eng.end_time else "Unknown"
+        status = "Active" if eng.active else "Finished"
+
+        embed.add_field(
+            name=f"Engagement ID: {eng.engagement_id} | {status}",
+            value=(
+                f"**System:** {system_name}\n"
+                f"**Attacker:** {eng.attacker}\n"
+                f"**Defender:** {eng.defender}\n"
+                f"**Start:** {start_time_str}\n"
+                f"**End:** {end_time_str}\n"
+                f"**Outcome:** {eng.outcome or 'Unknown'}\n"
+                f"**Final Score:** {eng.final_score or 'N/A'}\n"
+                f"**Type:** {eng.engagement_type or 'Unknown'}"
+            ),
+            inline=False
+        )
+
+    return embed
+
 async def get_active_engagements(bot: "FleetToolsBot") -> List[EngagementSystemData]:
     # Get the highest engagement_id from the database to know where to start
     async with get_session() as session:
