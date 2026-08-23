@@ -239,14 +239,14 @@ class Commands(commands.Cog):
             await interaction.followup.send("❌ Error fetching player history.", ephemeral=True)
 
     @app_commands.command(name="search_engagements", description="Search engagements for the fleet name and number of engagements to return")
-    @app_commands.describe(fleet_name="Fleet name to search for", limit="Number of engagements to return (default: 5)")
-    async def search_engagements(self, interaction: discord.Interaction, fleet_name: str, limit: int = 5):
+    @app_commands.describe(fleet_name="Fleet name to search for", limit="Number of engagements to return (default: 5)", invasion_type="Type of invasion to filter by (default: None)")
+    async def search_engagements(self, interaction: discord.Interaction, fleet_name: str, limit: int = 5, invasion_type: str = "None"):
         await interaction.response.defer()
         if limit > 20:
-            await interaction.followup.send("❌ Limit cannot exceed 15.", ephemeral=True)
+            await interaction.followup.send("❌ Limit cannot exceed 20.", ephemeral=True)
             return
         try:
-            engagements = await fleetwarshandler.search_engagements_by_fleet(self.bot, fleet_name, limit)
+            engagements = await fleetwarshandler.search_engagements_by_fleet(self.bot, fleet_name, limit, invasion_type)
             if not engagements:
                 await interaction.followup.send(f"❌ No engagements found for fleet: {fleet_name}", ephemeral=True)
                 return

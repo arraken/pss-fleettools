@@ -133,9 +133,9 @@ async def get_system_status(bot: "FleetToolsBot", system_name: str) -> Optional[
         'cooldown': cooldown_status
     }
 
-async def search_engagements_by_fleet(bot: "FleetToolsBot", fleet_name: str, limit: int = 5) -> List[EngagementSystemData]:
+async def search_engagements_by_fleet(bot: "FleetToolsBot", fleet_name: str, limit: int = 5, invasion_type: str = "None") -> List[EngagementSystemData]:
     async with get_session() as session:
-        engagements = await crud.get_engagements_by_fleet(session, fleet_name, active_only=False)
+        engagements = await crud.get_engagements_by_fleet(session, fleet_name, invasion_type=invasion_type, active_only=False)
 
     # Sort by start_time descending
     sorted_engagements = sorted(engagements, key=lambda e: e.start_time or datetime.min, reverse=True)

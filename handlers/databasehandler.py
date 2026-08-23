@@ -114,7 +114,7 @@ async def get_engagements_by_system(session: AsyncSession, system_id: int, activ
     except Exception:
         return []
 
-async def get_engagements_by_fleet(session: AsyncSession, fleet_name: str, active_only: bool = False) -> List[models.Engagement]:
+async def get_engagements_by_fleet(session: AsyncSession, fleet_name: str, active_only: bool = False, invasion_type: str = "None") -> List[models.Engagement]:
     try:
         stmt = select(models.Engagement).where(
             or_(
@@ -124,6 +124,8 @@ async def get_engagements_by_fleet(session: AsyncSession, fleet_name: str, activ
         )
         if active_only:
             stmt = stmt.where(models.Engagement.active == True)
+        if invasion_type != "None":
+            stmt = stmt.where(models.Engagement.engagement_type == invasion_type)
         stmt = stmt.order_by(models.Engagement.start_time.desc())
         result = await session.exec(stmt)
         return result.all()
