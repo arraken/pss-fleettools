@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 _MAX_TAKE_PER_PAGE = 100
 _HEADERS = ["Year", "Month", "Player Name", "Fleet Name", "Rank", "Division", "Stars", "Trophies"]
 _GAP_ROW = ["-"] * (len(_HEADERS) - 2)  # all columns except Year and Month
+_MAX_CONSECUTIVE_GAP_ROWS = 3
+_FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc"
 
 
 class PlayerNotFoundError(Exception):
@@ -111,35 +113,59 @@ async def build_history_rows(bot: "FleetToolsBot", player_name: str, history: Li
     earliest_key = min(entries_by_month)
 
     rows: List[List[str]] = []
+    pending_gap_keys: List[int] = []
+
+    def _flush_pending_gap() -> None:
+        """Emits buffered gap rows, collapsing runs longer than the threshold into a
+        single summary row."""
+        if not pending_gap_keys:
+            return
+        if len(pending_gap_keys) > _MAX_CONSECUTIVE_GAP_ROWS:
+            rows.append([f"... {len(pending_gap_keys)} months skipped ...", "", *_GAP_ROW])
+        else:
+            for gap_key in pending_gap_keys:
+                gap_year, gap_month = divmod(gap_key, 12)
+                if gap_month == 0:
+                    gap_year -= 1
+                    gap_month = 12
+                rows.append([str(gap_year), str(gap_month), *_GAP_ROW])
+        pending_gap_keys.clear()
+
     key = latest_key
     while key >= earliest_key:
+        entry = entries_by_month.get(key)
+        if entry is None:
+            pending_gap_keys.append(key)
+            key -= 1
+            continue
+
+        _flush_pending_gap()
+
         year, month = divmod(key, 12)
         if month == 0:
             year -= 1
             month = 12
 
-        entry = entries_by_month.get(key)
-        if entry is None:
-            rows.append([str(year), str(month), *_GAP_ROW])
-        else:
-            user = entry.user
-            alliance = entry.alliance
-            fleet_name = alliance.alliance_name if alliance else "-"
-            division = division_letters.get(alliance.division_design_id, "-") if alliance else "-"
-            rank = _prettify_rank(getattr(user, "alliance_membership_enum", None) and user.alliance_membership_enum.value)
-            stars = user.alliance_score if user.alliance_score is not None else "-"
-            trophies = user.trophy if user.trophy is not None else "-"
-            rows.append([
-                str(year),
-                str(month),
-                user.name or player_name,
-                fleet_name or "-",
-                rank,
-                division or "-",
-                str(stars),
-                str(trophies),
-            ])
+        user = entry.user
+        alliance = entry.alliance
+        fleet_name = alliance.alliance_name if alliance else "-"
+        division = division_letters.get(alliance.division_design_id, "-") if alliance else "-"
+        rank = _prettify_rank(getattr(user, "alliance_membership_enum", None) and user.alliance_membership_enum.value)
+        stars = user.alliance_score if user.alliance_score is not None else "-"
+        trophies = user.trophy if user.trophy is not None else "-"
+        rows.append([
+            str(year),
+            str(month),
+            user.name or player_name,
+            fleet_name or "-",
+            rank,
+            division or "-",
+            str(stars),
+            str(trophies),
+        ])
         key -= 1
+
+    _flush_pending_gap()
 
     return rows
 
@@ -152,11 +178,15 @@ def render_history_image(player_name: str, rows: List[List[str]]) -> io.BytesIO:
     title_height = font_size + 4 * padding
 
     try:
-        font = ImageFont.truetype("arial.ttf", font_size)
-        font_bold = ImageFont.truetype("arialbd.ttf", font_size)
-    except OSError:
-        font = ImageFont.load_default(size=font_size)
+        font = ImageFont.truetype(_FONT_PATH, font_size)
         font_bold = font
+    except OSError:
+        try:
+            font = ImageFont.truetype("arial.ttf", font_size)
+            font_bold = ImageFont.truetype("arialbd.ttf", font_size)
+        except OSError:
+            font = ImageFont.load_default(size=font_size)
+            font_bold = font
 
     measuring_image = Image.new("RGB", (1, 1))
     measuring_draw = ImageDraw.Draw(measuring_image)
