@@ -25,6 +25,7 @@ DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
 _DEFAULTS: Dict[str, Any] = {
     "prestige_recipes": {},
     "fleet_wars_systems": {},
+    "prestige_meta": {},
 }
 
 
@@ -36,6 +37,7 @@ class CacheManager:
         self._active_engagements_lock = asyncio.Lock()
         self._CacheManager__active_engagements = self.__active_engagements
         self._galaxy_systems_lock = asyncio.Lock()
+        self._prestige_recipes_lock = asyncio.Lock()
         self.api_prestige_recipes: Dict[int, List[PrestigeRecipe]] = {}
         self.api_crew_list: List[CrewMember] = []
 
@@ -44,6 +46,7 @@ class CacheManager:
         self.files: Dict[str, str] = {
             "prestige_recipes": os.path.join(DATA_DIR, "prestige_recipes.json"),
             "fleet_wars_systems": os.path.join(DATA_DIR, "fleet_wars_systems.json"),
+            "prestige_meta": os.path.join(DATA_DIR, "prestige_meta.json"),
         }
 
         # Prestige recipe building status tracking

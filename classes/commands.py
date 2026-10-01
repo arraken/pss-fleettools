@@ -407,4 +407,4 @@ class Commands(commands.Cog):
                 inline=False
             )
 
-        await interaction.followup.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
