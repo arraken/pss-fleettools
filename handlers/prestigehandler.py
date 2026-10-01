@@ -1,10 +1,3 @@
-"""
-This was copied from MemoryAlpha and will need integration.
-Most of the code is self-sufficient here so the only major thing might be the
-embed creation aspect?
-
-"""
-
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -45,6 +38,7 @@ class CrewMember:
     crew_id: str = ""
     design_id: str = ""
     rarity: str = ""
+    level: int = 0
     equipmask: int = 0
     special: str = ""
     collection: str = ""
@@ -161,11 +155,13 @@ async def generate_crewmember_list_from_raw(raw_crew_list: pssapi.entities.chara
         crew_id = crew.get("CharacterId", "Unknown")
         crew_name = crew.get("CharacterName", "Unknown")
         design_id = crew.get("CharacterDesignId", "Unknown")
+        level = int(crew.get("Level", 0))
 
         crew_list[crew_id] = CrewMember(
             name=crew_name,
             crew_id=crew_id,
             design_id=design_id,
+            level=level,
         )
     return crew_list
 
@@ -330,6 +326,20 @@ async def load_prestige_recipes_from_storage(bot: "FleetToolsBot") -> Dict[int, 
     except Exception as e:
         ic(f"Error loading prestige recipes from storage: {e}")
         return {}
+
+def filter_crew_by_level(
+        bot: "MemoryAlpha",
+        player_crew: Dict[str, CrewMember],
+        min_level: int):
+
+    if min_level <= 1:
+        return player_crew
+
+    return {
+        crew_id: crew_member
+        for crew_id, crew_member in player_crew.items()
+        if crew_member.level >= min_level
+    }
 
 def filter_crew_by_minimum_rarity(
         bot: "FleetToolsBot",

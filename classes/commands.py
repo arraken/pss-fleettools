@@ -142,9 +142,10 @@ class Commands(commands.Cog):
         app_commands.Choice(name="3 Stars/Unique/Blue", value="Unique"),
         app_commands.Choice(name="4 Stars/Epic/Purple", value="Epic"),
         app_commands.Choice(name="5 Stars/Hero/Orange", value="Hero"),])
-    async def prestige_calculator(self, interaction: discord.Interaction, player_name: str, target_crew_name: str, exclude: Optional[str] = None, min_rarity: str = "Common"):
-        from handlers import prestigehandler
+    async def prestige_calculator(self, interaction: discord.Interaction, player_name: str, target_crew_name: str,
+                                  exclude: Optional[str] = None, min_rarity: str = "Common", min_level: int = 1):
         await interaction.response.defer()
+        from handlers import prestigehandler
 
         # Get player
         users = await self.bot.api_manager.get_user_by_name(player_name)
@@ -173,10 +174,19 @@ class Commands(commands.Cog):
             if filtered_count > 0:
                 self.bot.logger.info(f"Filtered out {filtered_count} crew below {min_rarity} rarity for {player_name}")
 
+        if min_level > 1:
+            original_crew_count = len(player_crew)
+            player_crew = prestigehandler.filter_crew_by_level(self.bot, player_crew, min_level)
+            filtered_count = original_crew_count - len(player_crew)
+            if filtered_count > 0:
+                self.bot.logger.info(
+                    f"Filtered out {filtered_count} crew below level {min_level} rarity for {player_name}")
+
         # Handle exclusions AFTER rarity filter
         excluded_crew_names = []
         if exclude:
-            player_crew, excluded_crew_names = await prestigehandler.resolve_excluded_crew(exclude, player_crew, self.bot)
+            player_crew, excluded_crew_names = await prestigehandler.resolve_excluded_crew(exclude, player_crew,
+                                                                                           self.bot)
 
         # Use prestige recipes from cache_manager (loads from storage or rebuilds if needed)
         if not self.bot.cache_manager.api_prestige_recipes:
