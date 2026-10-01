@@ -238,15 +238,15 @@ class CacheManager:
                 str(result_id): [recipe.to_dict() for recipe in recipes]
                 for result_id, recipes in self.api_prestige_recipes.items()
             }
-            return self.bot.data_manager.save_prestige_recipes(serialized)
+            return self.save_json("prestige_recipes", serialized)
         except Exception as e:
             self.bot.logger.error(f"Error saving prestige recipes: {e}")
             return False
 
     async def clear_prestige_recipes_cache(self) -> bool:
-        async with self.__prestige_recipes_lock:
+        async with self._prestige_recipes_lock:
             self.api_prestige_recipes = {}
-            return self.bot.data_manager.clear_prestige_recipes()
+            return self.save_json("prestige_recipes", {})
 
     async def replace_prestige_recipes(self, new_recipes: dict) -> bool:
         """Atomically replace the cached prestige recipes and persist them to storage.
@@ -262,17 +262,17 @@ class CacheManager:
             )
             return False
 
-        async with self.__prestige_recipes_lock:
+        async with self._prestige_recipes_lock:
             self.api_prestige_recipes = new_recipes
             saved = self.save_prestige_recipes_data()
 
             if saved:
                 try:
                     recipe_count = sum(len(recipes) for recipes in new_recipes.values())
-                    meta = self.bot.data_manager.load_prestige_meta()
+                    meta = self.load_json("prestige_meta")
                     meta['last_success'] = datetime.now(tz=timezone.utc).isoformat()
                     meta['recipe_count'] = recipe_count
-                    self.bot.data_manager.save_prestige_meta(meta)
+                    self.save_json("prestige_meta", meta)
                 except Exception as e:
                     self.bot.logger.error(f"Error recording prestige rebuild success metadata: {e}")
 
@@ -288,14 +288,48 @@ class CacheManager:
         why the rebuild "didn't work".
         """
         try:
-            meta = self.bot.data_manager.load_prestige_meta()
+            meta = self.load_json("prestige_meta")
             meta['last_attempt_start'] = datetime.now(tz=timezone.utc).isoformat()
-            self.bot.data_manager.save_prestige_meta(meta)
+            self.save_json("prestige_meta", meta)
         except Exception as e:
             self.bot.logger.error(f"Error recording prestige rebuild attempt start: {e}")
 
+    def load_prestige_recipes(self) -> Dict[int, list]:
+        """Load stored recipes as {result_id(int): [recipe dict, ...]}."""
+        data = self.load_json("prestige_recipes")
+        out: Dict[int, list] = {}
+        for key, recipes in data.items():
+            try:
+                out[int(key)] = recipes
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    async def rebuild_prestige_recipes(self) -> bool:
+        """Rebuild recipes from the API and persist them; keeps old data on failure."""
+        from handlers import prestigehandler
+
+        if not self.api_crew_list:
+            await self.load_api_crew_list()
+        self.record_prestige_attempt_start()
+        self.prestige_build_status = "building_from_api"
+        self.prestige_build_progress["total_crew"] = len(self.api_crew_list)
+        try:
+            new_recipes = await prestigehandler.build_prestige_recipes(
+                self.bot, self._update_prestige_build_progress
+            )
+            saved = await self.replace_prestige_recipes(new_recipes)
+        except Exception as e:
+            self.prestige_build_status = "failed"
+            self.prestige_build_progress["error_message"] = str(e)
+            self.bot.logger.error(f"Error rebuilding prestige recipes: {e}")
+            return False
+        self.prestige_build_status = "complete" if saved else "failed"
+        self.prestige_build_progress["recipes_found"] = sum(len(r) for r in self.api_prestige_recipes.values())
+        return saved
+
     def get_prestige_meta(self) -> dict:
-        return self.bot.data_manager.load_prestige_meta()
+        return self.load_json("prestige_meta")
 
     def get_api_crew_list(self) -> List[CrewMember]:
         return self.api_crew_list
@@ -373,7 +407,7 @@ class CacheManager:
             self.bot.logger.info(
                 f"✅ Prestige recipes built from API: {self.prestige_build_progress['recipes_found']} recipes")
             # Save to storage for next time
-            await self.save_prestige_recipes_data()
+            self.save_prestige_recipes_data()
         except Exception as e:
             self.prestige_build_status = "failed"
             self.prestige_build_progress["error_message"] = str(e)
