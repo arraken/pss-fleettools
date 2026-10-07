@@ -196,12 +196,12 @@ class ApiManager:
         await self.pusher.run(access_token, device_user_id)
 
     async def _notify_market_watch_dropped(self, reason: str) -> None:
-        """Send a Discord alert to DEBUG_CHANNEL mentioning the dev."""
+        """Send a Discord alert to DEBUG_CHANNEL."""
         try:
             channel = await self.bot.retrieve_channel(DEBUG_CHANNEL)
             if channel:
                 await channel.send(
-                    f"<@{DEV_USER_ID}> ⚠️ **Market Watch** connection dropped — reconnecting automatically.\n"
+                    "**Market Watch** connection dropped — reconnecting automatically.\n"
                     f"```{reason}```"
                 )
         except Exception as e:
