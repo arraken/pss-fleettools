@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 import aiohttp
+import discord
 import pssapi
 from discord.app_commands.errors import CommandInvokeError
 from pssapi import PssApiClient
@@ -50,8 +51,8 @@ class ApiManager:
         self.__token_refresh_in_progress = False  # Flag to suppress duplicate error logs
         self._market_watch_task: Optional[asyncio.Task] = None
         self._market_flush_task: Optional[asyncio.Task] = None
-        self._market_message_queue: List[str] = []
-        self._market_watch_channels: Dict[int, int] = {}  # guild_id -> channel_id
+        self._pusher_queues: Dict[str, List[str]] = {}  # channel type value -> pending lines
+        self._pusher_channels: Dict[str, Dict[int, int]] = {}  # channel type value -> {guild_id: discord channel_id}
         self.pusher = pssapi.pusher.Pusher
 
     # ------------------------------------------------------------------
@@ -189,9 +190,11 @@ class ApiManager:
         self.pusher._socket_id = ""
         self.pusher._channels.clear()
 
-        market_channel = pssapi.pusher.Channel(pssapi.enums.PusherChannelType.MARKET)
-        market_channel.on_message(self.process_market_data)
-        self.pusher.add(market_channel)
+        # Default to market so a manual /market_watch still works with nothing configured.
+        for channel_type in set(self._pusher_channels) or {pssapi.enums.PusherChannelType.MARKET.value}:
+            pusher_channel = pssapi.pusher.Channel(pssapi.enums.PusherChannelType(channel_type))
+            pusher_channel.on_message(lambda data, t=channel_type: self.process_pusher_data(t, data))
+            self.pusher.add(pusher_channel)
 
         await self.pusher.run(access_token, device_user_id)
 
@@ -235,7 +238,7 @@ class ApiManager:
             self._market_watch_task.cancel()
         if self._market_flush_task and not self._market_flush_task.done():
             self._market_flush_task.cancel()
-        self._market_message_queue.clear()
+        self._pusher_queues.clear()
         self._market_watch_task = asyncio.ensure_future(self._market_watch_loop())
         self._market_flush_task = asyncio.ensure_future(self._market_flush_loop())
 
@@ -247,23 +250,33 @@ class ApiManager:
             self._market_flush_task.cancel()
         self._market_watch_task = None
         self._market_flush_task = None
-        self._market_message_queue.clear()
+        self._pusher_queues.clear()
 
-    def load_market_watch_channels(self, channels: Dict[int, int]) -> None:
-        """Bulk-load guild_id -> channel_id mappings (used on startup from DB)."""
-        self._market_watch_channels.update(channels)
+    def load_pusher_channels(self, channel_type: str, channels: Dict[int, int]) -> None:
+        """Bulk-load guild_id -> channel_id mappings for one pusher channel type (used on startup from DB)."""
+        if channels:
+            self._pusher_channels.setdefault(channel_type, {}).update(channels)
 
-    def set_market_watch_channel(self, guild_id: int, channel_id: int) -> None:
-        """Register/update the market watch output channel for a guild, starting the pusher if it isn't already running."""
-        self._market_watch_channels[guild_id] = channel_id
-        if not self.is_market_watch_running():
+    def set_pusher_channel(self, channel_type: str, guild_id: int, channel_id: int) -> None:
+        """Route a pusher channel type to a Discord channel for a guild. Resubscribes only if the set of subscribed types changed."""
+        is_new_type = channel_type not in self._pusher_channels
+        self._pusher_channels.setdefault(channel_type, {})[guild_id] = channel_id
+        if is_new_type or not self.is_market_watch_running():
             self.start_market_watch()
 
-    def clear_market_watch_channel(self, guild_id: int) -> bool:
-        """Remove a guild's market watch channel. Stops the pusher entirely once no channels remain."""
-        existed = self._market_watch_channels.pop(guild_id, None) is not None
-        if not self._market_watch_channels:
-            self.stop_market_watch()
+    def clear_pusher_channel(self, channel_type: str, guild_id: int) -> bool:
+        """Remove a guild's routing for a pusher channel type. Unsubscribes (by reconnecting) once no guild uses the type; stops entirely when none remain."""
+        guilds = self._pusher_channels.get(channel_type)
+        if guilds is None:
+            return False
+        existed = guilds.pop(guild_id, None) is not None
+        if not guilds:
+            del self._pusher_channels[channel_type]
+            self._pusher_queues.pop(channel_type, None)
+            if self._pusher_channels:
+                self.start_market_watch()
+            else:
+                self.stop_market_watch()
         return existed
 
     # PSS sends short message texts; the actor is always in user_name.
@@ -305,25 +318,41 @@ class ApiManager:
         currency_display = cls._CURRENCY_DISPLAY_NAMES.get(currency.strip().lower(), currency.strip().title())
         return f" for {int(amount):,} {currency_display}"
 
-    def process_market_data(self, data: Dict):
+    def process_pusher_data(self, channel_type: str, data: Dict):
         message = pssapi.entities.Message(data)
 
-        formatted = self._format_market_message(message)
+        if channel_type == pssapi.enums.PusherChannelType.MARKET.value:
+            formatted = self._format_market_message(message)
+        else:
+            formatted = self._format_chat_message(message)
         # Buffer the message; the flush loop sends batches to avoid rate limits.
-        self._market_message_queue.append(formatted)
+        self._pusher_queues.setdefault(channel_type, []).append(formatted)
+
+    @staticmethod
+    def _format_chat_message(message) -> str:
+        """Return `**username** (fleetname): message` for public chat channels (fleet part omitted if none)."""
+        user = message.user_name or "Unknown"
+        fleet = f" ({message.alliance_name})" if message.alliance_name else ""
+        return f"**{user}**{fleet}: {(message.message or '').strip()}"
 
     async def _flush_market_queue(self) -> None:
-        """Drain the queue and send all pending lines as one or more batched Discord messages to every configured channel."""
-        if not self._market_message_queue:
+        """Drain every channel type's queue, sending batched Discord messages to the channels configured for that type."""
+        for channel_type in list(self._pusher_queues):
+            await self._flush_pusher_queue(channel_type)
+
+    async def _flush_pusher_queue(self, channel_type: str) -> None:
+        queue = self._pusher_queues.get(channel_type)
+        if not queue:
             return
 
-        if not self._market_watch_channels:
-            self._market_message_queue.clear()
+        targets = self._pusher_channels.get(channel_type)
+        if not targets:
+            queue.clear()
             return
 
         # Snapshot and clear atomically so new messages keep arriving cleanly.
-        pending = self._market_message_queue.copy()
-        self._market_message_queue.clear()
+        pending = queue.copy()
+        queue.clear()
 
         # Pack lines into ≤ 1990-char chunks (Discord limit is 2000).
         batches: List[str] = []
@@ -341,16 +370,17 @@ class ApiManager:
             batches.append("\n".join(batch))
 
         # De-duplicate target channel IDs in case multiple guilds share one channel.
-        for channel_id in set(self._market_watch_channels.values()):
+        for channel_id in set(targets.values()):
             try:
                 channel = await self.bot.retrieve_channel(channel_id)
                 if not channel:
-                    self.bot.logger.error(f"[MarketWatch] Channel {channel_id} not found.")
+                    self.bot.logger.error(f"[Pusher:{channel_type}] Channel {channel_id} not found.")
                     continue
                 for message in batches:
-                    await channel.send(message)
+                    # Player chat must never trigger pings.
+                    await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:
-                self.bot.logger.error(f"[MarketWatch] Failed to flush message queue to channel {channel_id}: {e}")
+                self.bot.logger.error(f"[Pusher:{channel_type}] Failed to flush message queue to channel {channel_id}: {e}")
 
     async def _market_flush_loop(self) -> None:
         """Periodically flush buffered market messages to Discord (every 4 s)."""

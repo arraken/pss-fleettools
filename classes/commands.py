@@ -1,6 +1,7 @@
 from typing import Optional, TYPE_CHECKING
 
 import discord
+import pssapi
 from discord import app_commands
 from discord.ext import commands
 
@@ -316,11 +317,13 @@ class Commands(commands.Cog):
         )
 
         embed.add_field(
-            name="`/set_marketwatch_channel`",
+            name="`/set_pusher_channel`",
             value=(
-                "**Admin only.** Sets the channel where market watch (buy/sell) updates are posted for this server.\n"
+                "**Admin only.** Routes a live PSS feed (market or public chat) to a channel in this server.\n"
+                "**Required**\n"
+                "• `channel_type` — feed to route (autocomplete), e.g. `market`, `public-en`, `public-global`.\n"
                 "**Optional**\n"
-                "• `channel` — the text channel to post updates to. Omit to stop market watch for this server."
+                "• `channel` — the text channel to post to. Omit to remove that feed from this server."
             ),
             inline=False,
         )
@@ -354,34 +357,63 @@ class Commands(commands.Cog):
             self.bot.logger.error(f"[market_watch] Failed to start market watch: {e}", exc_info=e)
             await interaction.followup.send(f"❌ Market watch failed to start: `{e}`", ephemeral=True)
 
-    @app_commands.command(name="set_marketwatch_channel", description="Set (or clear) the channel where market watch updates are posted for this server")
-    @app_commands.describe(channel="Channel to post market updates to. Omit / choose none to stop market watch for this server.")
+    @staticmethod
+    def _routable_pusher_types() -> list:
+        # Private user messages are deliberately not routable to Discord.
+        return [t for t in pssapi.enums.PusherChannelType if t != pssapi.enums.PusherChannelType.INCOMING_MESSAGES_PRIVATE]
+
+    async def _pusher_type_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        current = current.lower()
+        return [
+            app_commands.Choice(name=f"{t.name.replace('_', ' ').title()} ({t.value})", value=t.value)
+            for t in self._routable_pusher_types()
+            if current in t.value.lower() or current in t.name.lower().replace("_", " ")
+        ][:25]
+
+    @app_commands.command(name="set_pusher_channel", description="Route a live PSS feed (market / public chat) to a channel, or remove it")
+    @app_commands.describe(
+        channel_type="Which PSS feed to route",
+        channel="Channel to post to. Leave blank to remove this feed from the server.",
+    )
+    @app_commands.autocomplete(channel_type=_pusher_type_autocomplete)
     @app_commands.checks.has_permissions(administrator=True)
-    async def set_marketwatch_channel(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+    async def set_pusher_channel(self, interaction: discord.Interaction, channel_type: str, channel: Optional[discord.TextChannel] = None):
         await interaction.response.defer(ephemeral=True)
 
         if interaction.guild is None:
             await interaction.followup.send("❌ This command can only be used in a server.", ephemeral=True)
             return
 
+        valid = {t.value: t for t in self._routable_pusher_types()}
+        if channel_type not in valid:
+            await interaction.followup.send("❌ Unknown channel type — pick one from the autocomplete list.", ephemeral=True)
+            return
+
         guild_id = interaction.guild.id
+        label = valid[channel_type].name.replace("_", " ").title()
+        legacy = channel_type == pssapi.enums.PusherChannelType.MARKET.value
 
         try:
             async with get_session() as session:
                 if channel is None:
-                    removed = await databasehandler.delete_alert_channel(session, guild_id, channel_type="marketwatch")
-                    self.bot.api_manager.clear_market_watch_channel(guild_id)
+                    removed = await databasehandler.delete_alert_channel(session, guild_id, channel_type=channel_type)
+                    if legacy:
+                        removed = await databasehandler.delete_alert_channel(session, guild_id, channel_type="marketwatch") or removed
+                    self.bot.api_manager.clear_pusher_channel(channel_type, guild_id)
                     if removed:
-                        await interaction.followup.send("🛑 Market watch channel cleared — pusher stopped for this server.", ephemeral=True)
+                        await interaction.followup.send(f"🛑 `{channel_type}` ({label}) feed removed from this server.", ephemeral=True)
                     else:
-                        await interaction.followup.send("ℹ️ No market watch channel was configured for this server.", ephemeral=True)
+                        await interaction.followup.send(f"ℹ️ `{channel_type}` ({label}) was not configured for this server.", ephemeral=True)
                 else:
-                    await databasehandler.upsert_alert_channel(session, guild_id, channel.id, channel_type="marketwatch")
-                    self.bot.api_manager.set_market_watch_channel(guild_id, channel.id)
-                    await interaction.followup.send(f"✅ Market watch will now post updates to {channel.mention}.", ephemeral=True)
+                    await databasehandler.upsert_alert_channel(session, guild_id, channel.id, channel_type=channel_type)
+                    if legacy:
+                        await databasehandler.delete_alert_channel(session, guild_id, channel_type="marketwatch")
+                    self.bot.api_manager.set_pusher_channel(channel_type, guild_id, channel.id)
+                    await interaction.followup.send(f"✅ `{channel_type}` ({label}) will now post to {channel.mention}.", ephemeral=True)
         except Exception as e:
-            self.bot.logger.error(f"Error in /set_marketwatch_channel: {e}", exc_info=e)
-            await interaction.followup.send("❌ Failed to update the market watch channel.", ephemeral=True)
+            self.bot.logger.error(f"Error in /set_pusher_channel: {e}", exc_info=e)
+            await interaction.followup.send("❌ Failed to update the pusher channel.", ephemeral=True)
+
     @app_commands.command(name="prestige_status", description="Show prestige recipe cache/storage status")
     async def prestige_status(self, interaction: discord.Interaction):
         meta = self.bot.cache_manager.get_prestige_meta()
