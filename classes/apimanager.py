@@ -196,6 +196,7 @@ class ApiManager:
             pusher_channel.on_message(lambda data, t=channel_type: self.process_pusher_data(t, data))
             self.pusher.add(pusher_channel)
 
+        self.bot.logger.info(f"[Pusher] Subscribing to: {', '.join(str(k) for k in self.pusher._channels)}")
         await self.pusher.run(access_token, device_user_id)
 
     async def _notify_market_watch_dropped(self, reason: str) -> None:
@@ -347,6 +348,7 @@ class ApiManager:
 
         targets = self._pusher_channels.get(channel_type)
         if not targets:
+            self.bot.logger.warning(f"[Pusher:{channel_type}] Dropping {len(queue)} message(s): no Discord channel configured.")
             queue.clear()
             return
 
