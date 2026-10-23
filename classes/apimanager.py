@@ -196,8 +196,18 @@ class ApiManager:
             pusher_channel.on_message(lambda data, t=channel_type: self.process_pusher_data(t, data))
             self.pusher.add(pusher_channel)
 
-        self.bot.logger.info(f"[Pusher] Subscribing to: {', '.join(str(k) for k in self.pusher._channels)}")
+        subscribed = ', '.join(str(k) for k in self.pusher._channels)
+        self.bot.logger.info(f"[Pusher] Subscribing to: {subscribed}")
+        await self._send_debug(f"**[Pusher]** Subscribing to: `{subscribed}`")
         await self.pusher.run(access_token, device_user_id)
+
+    async def _send_debug(self, text: str) -> None:
+        try:
+            channel = await self.bot.retrieve_channel(DEBUG_CHANNEL)
+            if channel:
+                await channel.send(text)
+        except Exception as e:
+            self.bot.logger.error(f"[Pusher] Failed to send debug message: {e}")
 
     async def _notify_market_watch_dropped(self, reason: str) -> None:
         """Send a Discord alert to DEBUG_CHANNEL."""
