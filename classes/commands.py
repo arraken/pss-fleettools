@@ -1,4 +1,5 @@
 from typing import Optional, TYPE_CHECKING
+import asyncio
 
 import discord
 import pssapi
@@ -146,6 +147,28 @@ class Commands(commands.Cog):
     async def prestige_calculator(self, interaction: discord.Interaction, player_name: str, target_crew_name: str,
                                   exclude: Optional[str] = None, min_rarity: str = "Common", min_level: int = 1):
         await interaction.response.defer()
+        self.bot.logger.info(
+            f"/prestige_calculator by {interaction.user} player={player_name!r} target={target_crew_name!r} "
+            f"exclude={exclude!r} min_rarity={min_rarity} min_level={min_level}")
+        try:
+            await asyncio.wait_for(
+                self._prestige_calculator_impl(interaction, player_name, target_crew_name, exclude, min_rarity,
+                                               min_level),
+                timeout=180)
+        except asyncio.TimeoutError:
+            self.bot.logger.error(
+                f"/prestige_calculator timed out after 180s: player={player_name!r} target={target_crew_name!r} "
+                f"exclude={exclude!r} min_rarity={min_rarity} min_level={min_level}")
+            await interaction.followup.send("❌ The prestige calculation timed out. Please try again later.")
+        except Exception as e:
+            self.bot.logger.error(
+                f"Error in /prestige_calculator: player={player_name!r} target={target_crew_name!r}: {e}",
+                exc_info=e)
+            await interaction.followup.send("❌ Error calculating prestige paths.")
+
+    async def _prestige_calculator_impl(self, interaction: discord.Interaction, player_name: str,
+                                        target_crew_name: str, exclude: Optional[str], min_rarity: str,
+                                        min_level: int):
         from handlers import prestigehandler
 
         # Get player

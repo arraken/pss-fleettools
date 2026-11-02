@@ -4,6 +4,8 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
+LOG_CHANNEL_ID = 1485646667196923914
+
 class FleetToolsBot(commands.Bot):
     def __init__(self, intents: discord.Intents | None = None):
         if intents is None:
@@ -39,8 +41,31 @@ class FleetToolsBot(commands.Bot):
         await self.add_cog(timer_monitor)
         await self.add_cog(Commands(self))
 
+        self.tree.error(self.on_app_command_error)
+        self._setup_discord_logging()
+
         await self.tree.sync()
         self.logger.info("Command tree synced.")
+
+    def _setup_discord_logging(self) -> None:
+        from classes.discordloghandler import DiscordLogHandler
+
+        handler = DiscordLogHandler(self, LOG_CHANNEL_ID)
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        handler.start()
+        logging.getLogger().addHandler(handler)
+
+    async def on_app_command_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        cmd = interaction.command.name if interaction.command else "unknown"
+        self.logger.error(f"Unhandled error in /{cmd} (user={interaction.user}): {error}", exc_info=error)
+        msg = "❌ Something went wrong running that command."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+        except Exception:
+            pass
 
     async def on_ready(self) -> None:
         self.logger.info(f"Logged in as {self.user} ({self.user.id})")
