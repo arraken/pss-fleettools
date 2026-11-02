@@ -382,17 +382,28 @@ class ApiManager:
             batches.append("\n".join(batch))
 
         # De-duplicate target channel IDs in case multiple guilds share one channel.
-        for channel_id in set(targets.values()):
+        channel_guilds: Dict[int, List[int]] = {}
+        for guild_id, channel_id in targets.items():
+            channel_guilds.setdefault(channel_id, []).append(guild_id)
+
+        for channel_id, guild_ids in channel_guilds.items():
+            guild_desc = ", ".join(
+                f"{g.name} ({g.id})" if (g := self.bot.get_guild(gid)) else f"unknown/left guild ({gid})"
+                for gid in guild_ids
+            )
             try:
                 channel = await self.bot.retrieve_channel(channel_id)
                 if not channel:
-                    self.bot.logger.error(f"[Pusher:{channel_type}] Channel {channel_id} not found.")
+                    self.bot.logger.error(
+                        f"[Pusher:{channel_type}] Channel {channel_id} not found for guild(s): {guild_desc}.")
                     continue
                 for message in batches:
                     # Player chat must never trigger pings.
                     await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:
-                self.bot.logger.error(f"[Pusher:{channel_type}] Failed to flush message queue to channel {channel_id}: {e}")
+                self.bot.logger.error(
+                    f"[Pusher:{channel_type}] Failed to flush message queue to channel {channel_id} "
+                    f"(guild(s): {guild_desc}): {e}")
 
     async def _market_flush_loop(self) -> None:
         """Periodically flush buffered market messages to Discord (every 4 s)."""
