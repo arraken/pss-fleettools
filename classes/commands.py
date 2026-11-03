@@ -12,6 +12,7 @@ from handlers.databasehandler import get_session
 if TYPE_CHECKING:
     from classes.bot import FleetToolsBot
 
+DEV_GUILD_ID = 1266151057835294730
 
 class Commands(commands.Cog):
     def __init__(self, bot: "FleetToolsBot"):
@@ -473,3 +474,36 @@ class Commands(commands.Cog):
             )
 
         await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="leave_server", description="[Developer only] Leave a server.")
+    @app_commands.guilds(discord.Object(id=DEV_GUILD_ID))
+    @app_commands.describe(server_id="The ID of the server to leave")
+    async def leave_server(self, interaction: discord.Interaction, server_id: str):
+        if interaction.user.id != 210545386580869121:
+            await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+            return
+
+        try:
+            server_id_int = int(server_id)
+        except ValueError:
+            await interaction.response.send_message(f"❌ Invalid server ID: `{server_id}`", ephemeral=True)
+            return
+
+        guild = self.bot.get_guild(server_id_int)
+        if guild is None:
+            await interaction.response.send_message(
+                f"❌ No guild found with ID `{server_id_int}`. Either the bot isn't in that server, or the ID is wrong.",
+                ephemeral=True)
+            return
+
+        guild_name = guild.name
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await guild.leave()
+            await interaction.followup.send(f"✅ Successfully left **{guild_name}** (ID: `{server_id_int}`).",
+                                            ephemeral=True)
+            self.bot.logger.info(f"Developer requested bot leave guild '{guild_name}' (ID: {server_id_int}).")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Failed to leave **{guild_name}**: {str(e)}", ephemeral=True)
+            self.bot.logger.error(f"Failed to leave guild {server_id_int}: {e}")
+
