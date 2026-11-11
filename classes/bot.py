@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 
 LOG_CHANNEL_ID = 1485646667196923914
+DEV_GUILD_ID = 1266151057835294730
 
 class FleetToolsBot(commands.Bot):
     def __init__(self, intents: discord.Intents | None = None):
@@ -47,6 +48,7 @@ class FleetToolsBot(commands.Bot):
         self._setup_discord_logging()
 
         await self.tree.sync()
+        await self.tree.sync(guild=discord.Object(id=DEV_GUILD_ID))
         self.logger.info("Command tree synced.")
 
     def _setup_discord_logging(self) -> None:
