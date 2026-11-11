@@ -341,6 +341,20 @@ class Commands(commands.Cog):
         )
 
         embed.add_field(
+            name="`/prestige_planner`",
+            value=(
+                "Plan several prestiges in a row from your roster (all replies are private).\n"
+                "• `plan player_name target_crew` — pick the two crew to combine; they're reserved and the result "
+                "becomes a planned crew usable in later steps\n"
+                "• `roster player_name [refresh]` — ✅ available · ✨ planned · 🔒 used\n"
+                "• `history player_name` — every step so far\n"
+                "• `undo player_name` — remove the latest unfinished step\n"
+                "• `reset player_name` — clear the plan and reload your crew"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
             name="`/set_pusher_channel`",
             value=(
                 "**Admin only.** Routes a live PSS feed (market or public chat) to a channel in this server.\n"

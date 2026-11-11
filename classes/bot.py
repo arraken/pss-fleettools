@@ -23,6 +23,7 @@ class FleetToolsBot(commands.Bot):
         from classes.apimanager import ApiManager
         from classes.cachemanager import CacheManager
         from classes.commands import Commands
+        from cogs.prestigeplanner import PrestigePlanner
         from cogs.timermonitor import TimerMonitor
         from database import DatabaseManager
 
@@ -40,6 +41,7 @@ class FleetToolsBot(commands.Bot):
 
         await self.add_cog(timer_monitor)
         await self.add_cog(Commands(self))
+        await self.add_cog(PrestigePlanner(self))
 
         self.tree.error(self.on_app_command_error)
         self._setup_discord_logging()
