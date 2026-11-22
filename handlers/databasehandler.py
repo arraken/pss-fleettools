@@ -219,6 +219,18 @@ async def upsert_alert_channel(session: AsyncSession, guild_id: int, channel_id:
     return new_row
 
 
+async def delete_guild_alert_channels(session: AsyncSession, guild_id: int, channel_type: Optional[str] = None) -> int:
+    """Deletes every AlertChannel row for a guild (optionally only one channel type). Returns the number removed."""
+    query = select(models.AlertChannelDB).where(models.AlertChannelDB.guild_id == guild_id)
+    if channel_type is not None:
+        query = query.where(models.AlertChannelDB.channel_type == channel_type)
+    rows = list((await session.exec(query)).all())
+    for row in rows:
+        await session.delete(row)
+    await session.flush()
+    return len(rows)
+
+
 async def delete_alert_channel(session: AsyncSession, guild_id: int, channel_type: str = "engagements") -> bool:
     """Deletes the AlertChannel row for a given guild and channel type, if present."""
     existing = await get_alert_channel(session, guild_id, channel_type)

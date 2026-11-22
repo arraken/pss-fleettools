@@ -53,6 +53,7 @@ class ApiManager:
         self._market_flush_task: Optional[asyncio.Task] = None
         self._pusher_queues: Dict[str, List[str]] = {}  # channel type value -> pending lines
         self._pusher_channels: Dict[str, Dict[int, int]] = {}  # channel type value -> {guild_id: discord channel_id}
+        self._pusher_failures: Dict[tuple, int] = {}  # (channel type, guild_id) -> consecutive delivery failures
         self.pusher = pssapi.pusher.Pusher
 
     # ------------------------------------------------------------------
@@ -290,6 +291,18 @@ class ApiManager:
                 self.stop_market_watch()
         return existed
 
+    _PUSHER_MAX_FAILURES = 10  # consecutive failed flushes before a route is auto-deregistered
+
+    def pusher_routes(self) -> Dict[str, Dict[int, int]]:
+        """Snapshot of channel type -> {guild_id: channel_id}."""
+        return {t: dict(g) for t, g in self._pusher_channels.items()}
+
+    def clear_guild_pusher_channels(self, guild_id: int, channel_type: Optional[str] = None) -> None:
+        """Remove a guild's pusher routes for one channel type, or all types when None."""
+        for t in [channel_type] if channel_type else list(self._pusher_channels):
+            self.clear_pusher_channel(t, guild_id)
+            self._pusher_failures.pop((t, guild_id), None)
+
     # PSS sends short message texts; the actor is always in user_name.
     # SOLD:    message = "Bought {qty} {item} from {seller}"   user_name = buyer
     # LISTED:  message = "Selling {qty} {item}"                user_name = seller
@@ -391,19 +404,39 @@ class ApiManager:
                 f"{g.name} ({g.id})" if (g := self.bot.get_guild(gid)) else f"unknown/left guild ({gid})"
                 for gid in guild_ids
             )
+            failure: Optional[str] = None
             try:
                 channel = await self.bot.retrieve_channel(channel_id)
                 if not channel:
+                    failure = "channel not found or inaccessible"
                     self.bot.logger.error(
                         f"[Pusher:{channel_type}] Channel {channel_id} not found for guild(s): {guild_desc}.")
-                    continue
-                for message in batches:
-                    # Player chat must never trigger pings.
-                    await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
+                else:
+                    for message in batches:
+                        # Player chat must never trigger pings.
+                        await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:
+                failure = str(e)
                 self.bot.logger.error(
                     f"[Pusher:{channel_type}] Failed to flush message queue to channel {channel_id} "
                     f"(guild(s): {guild_desc}): {e}")
+
+            for gid in guild_ids:
+                key = (channel_type, gid)
+                if failure is None:
+                    self._pusher_failures.pop(key, None)
+                    continue
+                self._pusher_failures[key] = self._pusher_failures.get(key, 0) + 1
+                if self.bot.get_guild(gid) is None:
+                    reason = "bot is no longer in guild"
+                elif self._pusher_failures[key] >= self._PUSHER_MAX_FAILURES:
+                    reason = f"{self._pusher_failures[key]} consecutive delivery failures ({failure})"
+                else:
+                    continue
+                # Fire-and-forget so DB work never blocks the flush loop.
+                asyncio.create_task(self.bot.deregister_guild_routes(gid, channel_type, reason))
+                self._pusher_failures.pop(key, None)
+                self._pusher_channels.get(channel_type, {}).pop(gid, None)
 
     async def _market_flush_loop(self) -> None:
         """Periodically flush buffered market messages to Discord (every 4 s)."""

@@ -74,6 +74,36 @@ class FleetToolsBot(commands.Bot):
     async def on_ready(self) -> None:
         self.logger.info(f"Logged in as {self.user} ({self.user.id})")
         await self._load_market_watch_channels()
+        await self._purge_left_guild_routes()
+
+    async def on_guild_remove(self, guild: discord.Guild) -> None:
+        await self.deregister_guild_routes(guild.id, reason="bot removed from guild")
+
+    async def deregister_guild_routes(self, guild_id: int, channel_type: Optional[str] = None, reason: str = "") -> None:
+        """Remove a guild's alert-channel rows from the DB and its pusher routes from memory."""
+        from handlers import databasehandler
+        from handlers.databasehandler import get_session
+
+        try:
+            async with get_session() as session:
+                removed = await databasehandler.delete_guild_alert_channels(session, guild_id, channel_type)
+                if channel_type in (None, "market"):
+                    removed += await databasehandler.delete_guild_alert_channels(session, guild_id, "marketwatch")
+            if self.api_manager:
+                self.api_manager.clear_guild_pusher_channels(guild_id, channel_type)
+            self.logger.warning(
+                f"Deregistered {removed} alert channel row(s) for guild {guild_id}"
+                f"{f' ({channel_type})' if channel_type else ''}: {reason}")
+        except Exception as e:
+            self.logger.error(f"Failed to deregister routes for guild {guild_id}: {e}", exc_info=e)
+
+    async def _purge_left_guild_routes(self) -> None:
+        """On startup, drop pusher routes for guilds the bot is no longer in."""
+        if not self.api_manager:
+            return
+        stale = {gid for guilds in self.api_manager.pusher_routes().values() for gid in guilds if self.get_guild(gid) is None}
+        for gid in stale:
+            await self.deregister_guild_routes(gid, reason="bot is no longer in guild")
 
     async def _load_market_watch_channels(self) -> None:
         """Load configured pusher channel routes from the DB and (re)start the pusher if any are set."""
