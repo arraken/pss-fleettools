@@ -525,6 +525,9 @@ class ApiManager:
 
         return await self._make_api_call(_call)
 
+    async def get_alliances_by_ranking(self, skip: int, take: int):
+        return await self._make_api_call(self.client.alliance_service.list_alliances_by_ranking, skip, take)
+
     async def get_user_by_name(self, name: str):
         return await self._make_api_call(self.client.user_service.search_users, name)
 

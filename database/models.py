@@ -41,6 +41,19 @@ class GalaxySystem(SQLModel, table=True):
     # flagged_at: Optional[datetime] = Field(default=None)
 
 
+class TournamentSnapshot(SQLModel, table=True):
+    """One fleet's tournament stars at a 5-minute sample time (UTC, naive in SQLite).
+    Used to rebuild /graph plots for the current or most recent tournament."""
+    __tablename__ = "tournament_snapshots"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    timestamp: datetime = Field(index=True)
+    alliance_id: int = Field(index=True)
+    alliance_name: str
+    division_design_id: int
+    stars: int
+
+
 class FleetRoleMappingDB(SQLModel, table=True):
     """Maps a fleet name to a Discord role ID for engagement alerts.
     Loaded dynamically; populate via admin commands or direct DB edits."""

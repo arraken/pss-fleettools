@@ -273,6 +273,29 @@ class Commands(commands.Cog):
             self.bot.logger.error(f"Error in /player_history: {e}", exc_info=e)
             await interaction.followup.send("❌ Error fetching player history.", ephemeral=True)
 
+    @app_commands.guilds(discord.Object(id=DEV_GUILD_ID))
+    @app_commands.command(name="graph", description="Plot tournament stars (live during a tournament, otherwise the last one)")
+    @app_commands.describe(
+        division="Division letter",
+        places="Range of places, e.g. 1-5 or 1 to 5",
+        period="Length of period, e.g. '1 day 12 hours' (minute, hour, day, week, month)",
+    )
+    @app_commands.choices(division=[app_commands.Choice(name=d.upper(), value=d) for d in "abcd"])
+    @app_commands.guild_only()
+    async def graph(self, interaction: discord.Interaction, division: Optional[app_commands.Choice[str]] = None,
+                    places: Optional[str] = None, period: Optional[str] = None):
+        from handlers import graphhandler
+
+        await interaction.response.defer()
+        try:
+            image = await graphhandler.build_graph(self.bot, division.value if division else None, places, period)
+            await interaction.followup.send(file=discord.File(image, filename="graph.png"))
+        except graphhandler.GraphInputError as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+        except Exception as e:
+            self.bot.logger.error(f"Error in /graph: {e}", exc_info=e)
+            await interaction.followup.send("❌ Error generating graph.", ephemeral=True)
+
     @app_commands.command(name="search_engagements", description="Search engagements for the fleet name and number of engagements to return")
     @app_commands.describe(fleet_name="Fleet name to search for", limit="Number of engagements to return (default: 5)", invasion_type="Type of invasion to filter by (default: None)")
     async def search_engagements(self, interaction: discord.Interaction, fleet_name: str, limit: int = 5, invasion_type: str = "None"):

@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands, tasks
 
 from data.constants.galaxy import STAR_SYSTEMS
-from handlers import fleetwarshandler, databasehandler
+from handlers import fleetwarshandler, databasehandler, graphhandler
 from data.databaseclasses import EngagementSystemData
 from handlers.databasehandler import get_session
 
@@ -29,11 +29,13 @@ class TimerMonitor(commands.Cog):
         self.engagements_pulse.start()
         self.galaxy_state_refresh.start()
         self.monthly_prestige_rebuild.start()
+        self.tournament_snapshot.start()
 
     async def cog_unload(self) -> None:
         self.engagements_pulse.cancel()
         self.galaxy_state_refresh.cancel()
         self.monthly_prestige_rebuild.cancel()
+        self.tournament_snapshot.cancel()
 
     @tasks.loop(minutes=1)
     async def engagements_pulse(self):
@@ -50,6 +52,25 @@ class TimerMonitor(commands.Cog):
             await asyncio.wait_for(self._galaxy_state_refresh_inner(), timeout=300.0)
         except asyncio.TimeoutError:
             self.bot.logger.error("galaxy_state_refresh timed out after 6 minutes — skipping this cycle.")
+
+    @tasks.loop(minutes=5)
+    async def tournament_snapshot(self):
+        try:
+            stored = await asyncio.wait_for(graphhandler.record_snapshot(self.bot), timeout=120.0)
+            if stored:
+                self.bot.logger.info(f"Tournament snapshot stored ({stored} fleets).")
+        except asyncio.TimeoutError:
+            self.bot.logger.error("Tournament snapshot timed out after 2 minutes")
+        except Exception as e:
+            self.bot.logger.error(f"Tournament snapshot error: {e}", exc_info=True)
+
+    @tournament_snapshot.before_loop
+    async def before_tournament_snapshot(self):
+        await self.bot.wait_until_ready()
+        # Align to the next 5-minute boundary so samples land on :00, :05, :10, ...
+        now = datetime.now(timezone.utc)
+        next_sample = graphhandler.floor_to_sample(now) + timedelta(minutes=5)
+        await asyncio.sleep((next_sample - now).total_seconds())
 
     @engagements_pulse.before_loop
     async def before_engagements_pulse(self):

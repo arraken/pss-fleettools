@@ -9,3 +9,4 @@ fuzzywuzzy
 python-levenshtein
 pss-fleet-data-client
 Pillow
+matplotlib
