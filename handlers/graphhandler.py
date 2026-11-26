@@ -154,7 +154,7 @@ async def _load_snapshots(start: datetime, end: datetime) -> List[TournamentSnap
 
 
 def _select_series(snapshots: List[TournamentSnapshot], division_ids: Optional[set],
-                   places: Optional[Tuple[int, int]]) -> List[Tuple[str, List[datetime], List[int]]]:
+                   places: Optional[Tuple[int, int]], start: datetime) -> List[Tuple[str, List[datetime], List[int]]]:
     latest_time = snapshots[-1].timestamp
     standings = [s for s in snapshots if s.timestamp == latest_time
                  and (division_ids is None or s.division_design_id in division_ids)]
@@ -173,6 +173,11 @@ def _select_series(snapshots: List[TournamentSnapshot], division_ids: Optional[s
         if entry:
             entry[1].append(_aware(snapshot.timestamp))
             entry[2].append(snapshot.stars)
+    # Extend each line back to the left edge using its first known value.
+    for _, times, stars in series.values():
+        if times and times[0] > start:
+            times.insert(0, start)
+            stars.insert(0, stars[0])
     return [series[s.alliance_id] for s in standings]
 
 
@@ -238,7 +243,7 @@ async def build_graph(bot: "FleetToolsBot", division: Optional[str], places: Opt
         if division:
             letters = await bot.api_manager.get_division_letter_map()
             division_ids = {did for did, letter in letters.items() if letter.lower() == division.lower()}
-        series_list = _select_series(snapshots, division_ids, places_range)
+        series_list = _select_series(snapshots, division_ids, places_range, start)
         cached = await asyncio.get_running_loop().run_in_executor(None, render_graph, series_list, start, end)
         for key in [k for k in _graph_cache if k[3] != end]:
             del _graph_cache[key]

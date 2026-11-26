@@ -43,6 +43,8 @@ class FleetToolsBot(commands.Bot):
         await self.add_cog(timer_monitor)
         await self.add_cog(Commands(self))
         await self.add_cog(PrestigePlanner(self))
+        from cogs.tempbackfill import TempBackfill  # TEMP backfill
+        await self.add_cog(TempBackfill(self))  # TEMP backfill
 
         self.tree.error(self.on_app_command_error)
         self._setup_discord_logging()
